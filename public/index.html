@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>렌주 오목</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- 로비 -->
+  <main id="lobby" class="lobby">
+    <div class="lobby-card">
+      <h1><span class="stone-icon black"></span><span class="stone-icon white"></span> 렌주 오목</h1>
+      <p class="sub">친구와 함께하는 렌주룰 온라인 오목</p>
+
+      <label class="field">
+        <span>닉네임</span>
+        <input id="nameInput" maxlength="12" placeholder="닉네임을 입력하세요" />
+      </label>
+
+      <section class="lobby-section">
+        <h2>방 만들기</h2>
+        <div class="row">
+          <select id="timeSelect" aria-label="한 수당 제한 시간">
+            <option value="15">한 수 15초</option>
+            <option value="30" selected>한 수 30초</option>
+            <option value="60">한 수 60초</option>
+          </select>
+          <button id="createBtn" class="primary">방 만들기</button>
+        </div>
+      </section>
+
+      <section class="lobby-section">
+        <h2>방 입장</h2>
+        <div class="row">
+          <input id="codeInput" maxlength="6" placeholder="방 코드 6자리" autocomplete="off" />
+          <button id="joinBtn">입장</button>
+        </div>
+      </section>
+
+      <details class="rules">
+        <summary>렌주룰이란?</summary>
+        <ul>
+          <li>흑이 먼저 두며, 첫 수는 정중앙(천원)에 둡니다.</li>
+          <li>가로·세로·대각선으로 5개를 먼저 이으면 승리합니다.</li>
+          <li><b>흑</b>은 정확히 5목만 승리이며, <b>3-3, 4-4, 장목(6목 이상)</b>은 둘 수 없습니다(금수).</li>
+          <li>흑이 5목을 만드는 수는 금수가 함께 생겨도 승리입니다.</li>
+          <li><b>백</b>은 금수가 없고, 6목 이상도 승리입니다.</li>
+        </ul>
+      </details>
+    </div>
+  </main>
+
+  <!-- 게임 -->
+  <main id="game" class="game hidden">
+    <header class="topbar">
+      <button id="leaveBtn" class="ghost">← 나가기</button>
+      <div class="room-info">
+        방 코드 <b id="roomCode"></b>
+        <button id="copyBtn" class="small">초대 링크 복사</button>
+      </div>
+      <span id="timeLimitLabel" class="muted"></span>
+    </header>
+
+    <div class="layout">
+      <section class="board-wrap">
+        <div id="statusBar" class="status-bar"></div>
+        <canvas id="board"></canvas>
+        <div class="board-tools">
+          <label class="check"><input type="checkbox" id="numToggle" /> 수순 번호</label>
+          <label class="check"><input type="checkbox" id="forbidToggle" checked /> 금수 표시</label>
+          <label class="check"><input type="checkbox" id="soundToggle" checked /> 소리</label>
+        </div>
+      </section>
+
+      <aside class="side">
+        <div class="players">
+          <div class="player" id="player0"></div>
+          <div class="player" id="player1"></div>
+        </div>
+
+        <div id="undoPrompt" class="undo-prompt hidden">
+          <span>상대가 무르기를 요청했습니다.</span>
+          <div class="row">
+            <button id="undoAccept" class="primary small">수락</button>
+            <button id="undoReject" class="small">거절</button>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button id="undoBtn">무르기</button>
+          <button id="resignBtn" class="danger">기권</button>
+          <button id="rematchBtn" class="primary hidden">재대국</button>
+        </div>
+
+        <div class="spectators" id="spectators"></div>
+
+        <div class="chat">
+          <div id="chatLog" class="chat-log"></div>
+          <form id="chatForm" class="chat-form">
+            <input id="chatInput" maxlength="200" placeholder="메시지 입력" autocomplete="off" />
+            <button type="submit">전송</button>
+          </form>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/shared/renju.js"></script>
+  <script src="client.js"></script>
+</body>
+</html>
