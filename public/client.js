@@ -563,10 +563,10 @@
     } catch { /* 소리 미지원 */ }
   }
 
-  // ---------- 상태 변화 알림 (내 차례, 상대 요청 등) ----------
+  // ---------- 상태 변화 표시 (내 차례, 상대 요청 등) ----------
   function notifyChanges(prev, s) {
     const me = s.you;
-    if (!me.color && me.seat < 0) return; // 관전자는 알림 없음
+    if (!me.color && me.seat < 0) return; // 관전자는 표시 없음
     const opponentSeat = me.seat >= 0 ? 1 - me.seat : -1;
     const wasPlaying = prev && prev.code === s.code && prev.status === 'playing';
 
@@ -574,30 +574,18 @@
     if (s.status === 'playing' && !wasPlaying) {
       rematchDismissed = false;
       showBadge(`대국 시작! 나는 ${COLOR_NAME[me.color]}`, 1600);
-      chime();
-      attention('대국 시작!');
       return;
     }
 
     // 대국 종료
     if (s.status === 'ended' && wasPlaying) {
       showBadge(!s.winner ? '무승부' : s.winner === me.color ? '승리! 🎉' : '패배', 1800);
-      attention(!s.winner ? '무승부' : s.winner === me.color ? '승리!' : '패배');
     }
 
     if (s.status === 'playing' && wasPlaying) {
       // 내 차례가 됨
       const moved = prev.turn !== s.turn || prev.moves.length !== s.moves.length;
-      if (me.color === s.turn && moved) {
-        showBadge('내 차례!');
-        if (document.hidden) chime();
-        attention('내 차례입니다');
-      }
-      // 상대가 무르기 요청
-      if (s.undoRequest && s.undoRequest !== me.color && prev.undoRequest !== s.undoRequest) {
-        chime();
-        attention('무르기 요청');
-      }
+      if (me.color === s.turn && moved) showBadge('내 차례!');
       // 내 무르기 요청의 결과
       if (prev.undoRequest === me.color && !s.undoRequest) {
         if (s.moves.length < prev.moves.length) toast('무르기가 수락되었습니다');
@@ -611,8 +599,6 @@
         !(prev && prev.rematch.includes(opponentSeat))) {
       rematchDismissed = false;
       render();
-      chime();
-      attention('재대국 요청');
     }
   }
 
@@ -623,46 +609,6 @@
     el.classList.add('show');
     clearTimeout(badgeTimer);
     badgeTimer = setTimeout(() => el.classList.remove('show'), ms);
-  }
-
-  // 다른 탭을 보고 있을 때 브라우저 탭 제목을 깜빡여 알림
-  const baseTitle = document.title;
-  let titleTimer = null;
-  function attention(text) {
-    if (!document.hidden) return;
-    clearInterval(titleTimer);
-    let on = false;
-    titleTimer = setInterval(() => {
-      on = !on;
-      document.title = on ? `🔔 ${text}` : baseTitle;
-    }, 900);
-    document.title = `🔔 ${text}`;
-  }
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden) return;
-    clearInterval(titleTimer);
-    document.title = baseTitle;
-  });
-
-  // 알림음: 부드러운 '띵동'
-  function chime() {
-    if (!$('soundToggle').checked) return;
-    try {
-      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-      const t = audioCtx.currentTime;
-      [[880, 0], [1320, 0.13]].forEach(([freq, delay]) => {
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = 'sine';
-        osc.frequency.value = freq;
-        gain.gain.setValueAtTime(0.0001, t + delay);
-        gain.gain.exponentialRampToValueAtTime(0.2, t + delay + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.4);
-        osc.connect(gain).connect(audioCtx.destination);
-        osc.start(t + delay);
-        osc.stop(t + delay + 0.45);
-      });
-    } catch { /* 소리 미지원 */ }
   }
 
   let toastTimer = null;
