@@ -518,48 +518,22 @@
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', drawBoard);
 
   // ---------- 효과음 / 알림 ----------
-  // 돌이 나무판에 부딪히는 '탁' 소리: 짧은 잡음(타격음) + 낮은 나무 울림
   let audioCtx = null;
-  let noiseBuffer = null;
   function playClick() {
     if (!$('soundToggle').checked) return;
     try {
       audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-      if (audioCtx.state === 'suspended') audioCtx.resume();
-      if (!noiseBuffer) {
-        const len = Math.floor(audioCtx.sampleRate * 0.05);
-        noiseBuffer = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
-        const data = noiseBuffer.getChannelData(0);
-        for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
-      }
       const t = audioCtx.currentTime;
-      const vary = 0.9 + Math.random() * 0.2; // 매번 살짝 다르게
-
-      // 타격음: 잡음을 대역 필터로 걸러 아주 짧게
-      const noise = audioCtx.createBufferSource();
-      noise.buffer = noiseBuffer;
-      const band = audioCtx.createBiquadFilter();
-      band.type = 'bandpass';
-      band.frequency.value = 4200 * vary;
-      band.Q.value = 1.8;
-      const clickGain = audioCtx.createGain();
-      clickGain.gain.setValueAtTime(1.0, t);
-      clickGain.gain.exponentialRampToValueAtTime(0.001, t + 0.025);
-      noise.connect(band).connect(clickGain).connect(audioCtx.destination);
-      noise.start(t);
-      noise.stop(t + 0.05);
-
-      // 나무판 울림: 높은 음을 작고 아주 짧게 (낮으면 북소리처럼 들림)
-      const body = audioCtx.createOscillator();
-      body.type = 'sine';
-      body.frequency.setValueAtTime(1300 * vary, t);
-      body.frequency.exponentialRampToValueAtTime(900 * vary, t + 0.02);
-      const bodyGain = audioCtx.createGain();
-      bodyGain.gain.setValueAtTime(0.12, t);
-      bodyGain.gain.exponentialRampToValueAtTime(0.001, t + 0.03);
-      body.connect(bodyGain).connect(audioCtx.destination);
-      body.start(t);
-      body.stop(t + 0.04);
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(900, t);
+      osc.frequency.exponentialRampToValueAtTime(250, t + 0.06);
+      gain.gain.setValueAtTime(0.25, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t);
+      osc.stop(t + 0.1);
     } catch { /* 소리 미지원 */ }
   }
 
