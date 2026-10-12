@@ -67,7 +67,19 @@
     <div class="layout">
       <section class="board-wrap">
         <div id="statusBar" class="status-bar"></div>
-        <canvas id="board"></canvas>
+        <div id="boardStage" class="board-stage">
+          <canvas id="board"></canvas>
+          <div id="turnBadge" class="turn-badge"></div>
+          <!-- 상대의 무르기/재대국 요청 알림 카드 -->
+          <div id="requestCard" class="request-card hidden">
+            <div class="request-icon">🔔</div>
+            <p id="requestText"></p>
+            <div class="row">
+              <button id="requestYes" class="primary"></button>
+              <button id="requestNo"></button>
+            </div>
+          </div>
+        </div>
         <div class="board-tools">
           <label class="check"><input type="checkbox" id="numToggle" /> 수순 번호</label>
           <label class="check"><input type="checkbox" id="forbidToggle" checked /> 금수 표시</label>
@@ -79,14 +91,6 @@
         <div class="players">
           <div class="player" id="player0"></div>
           <div class="player" id="player1"></div>
-        </div>
-
-        <div id="undoPrompt" class="undo-prompt hidden">
-          <span>상대가 무르기를 요청했습니다.</span>
-          <div class="row">
-            <button id="undoAccept" class="primary small">수락</button>
-            <button id="undoReject" class="small">거절</button>
-          </div>
         </div>
 
         <div class="actions">

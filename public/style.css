@@ -133,7 +133,80 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
   font-weight: 500;
   text-align: center;
 }
-.status-bar.my-turn { background: var(--highlight); border-color: var(--accent); }
+.status-bar.my-turn {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 700;
+  animation: pulse-bar 1.6s ease-in-out infinite;
+}
+@keyframes pulse-bar {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(217, 138, 61, 0.55); }
+  50% { box-shadow: 0 0 0 6px rgba(217, 138, 61, 0); }
+}
+
+/* 바둑판 + 알림 오버레이 */
+.board-stage { position: relative; border-radius: 6px; }
+.board-stage.my-turn #board { animation: glow-board 1.6s ease-in-out infinite; }
+@keyframes glow-board {
+  0%, 100% { box-shadow: 0 0 0 3px var(--accent), 0 0 12px 2px rgba(217, 138, 61, 0.5); }
+  50% { box-shadow: 0 0 0 3px var(--accent), 0 0 26px 8px rgba(217, 138, 61, 0.75); }
+}
+
+.turn-badge {
+  position: absolute;
+  top: 16%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.8);
+  background: rgba(30, 24, 18, 0.88);
+  color: #fff;
+  padding: 14px 28px;
+  border-radius: 999px;
+  font-size: 22px;
+  font-weight: 700;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s, transform 0.25s;
+}
+.turn-badge.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+
+.request-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(320px, calc(100% - 32px));
+  background: var(--panel);
+  border: 3px solid var(--accent);
+  border-radius: 16px;
+  padding: 20px;
+  text-align: center;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+  animation: pop-in 0.25s ease-out, pulse-card 1.6s ease-in-out 0.25s infinite;
+  z-index: 2;
+}
+.request-card p { margin: 6px 0 16px; font-size: 17px; font-weight: 700; line-height: 1.4; }
+.request-card .row { justify-content: center; }
+.request-card button { flex: 1; padding: 10px 14px; }
+.request-icon { font-size: 30px; animation: ring 1.2s ease-in-out infinite; display: inline-block; }
+@keyframes pop-in {
+  from { transform: translate(-50%, -50%) scale(0.7); opacity: 0; }
+  to { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
+@keyframes pulse-card {
+  0%, 100% { box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35), 0 0 0 0 rgba(217, 138, 61, 0.6); }
+  50% { box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35), 0 0 0 10px rgba(217, 138, 61, 0); }
+}
+@keyframes ring {
+  0%, 60%, 100% { transform: rotate(0); }
+  10%, 30%, 50% { transform: rotate(-15deg); }
+  20%, 40% { transform: rotate(15deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-bar.my-turn, .board-stage.my-turn #board, .request-card, .request-icon { animation: none; }
+}
 .board-tools { display: flex; gap: 16px; margin-top: 8px; flex-wrap: wrap; }
 .check { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--muted); cursor: pointer; }
 
@@ -163,17 +236,6 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 .player .time.low { color: var(--danger); }
 .player .bar { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--accent); }
 
-.undo-prompt {
-  background: var(--highlight);
-  border: 1px solid var(--accent);
-  border-radius: 10px;
-  padding: 10px 12px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
 .actions { display: flex; gap: 8px; }
 .actions button { flex: 1; }
 .spectators { font-size: 13px; color: var(--muted); }
