@@ -518,22 +518,48 @@
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', drawBoard);
 
   // ---------- 효과음 / 알림 ----------
+  // 돌이 나무판에 부딪히는 '탁' 소리: 짧은 잡음(타격음) + 낮은 나무 울림
   let audioCtx = null;
+  let noiseBuffer = null;
   function playClick() {
     if (!$('soundToggle').checked) return;
     try {
       audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      if (!noiseBuffer) {
+        const len = Math.floor(audioCtx.sampleRate * 0.05);
+        noiseBuffer = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+        const data = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+      }
       const t = audioCtx.currentTime;
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(900, t);
-      osc.frequency.exponentialRampToValueAtTime(250, t + 0.06);
-      gain.gain.setValueAtTime(0.25, t);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
-      osc.connect(gain).connect(audioCtx.destination);
-      osc.start(t);
-      osc.stop(t + 0.1);
+      const vary = 0.9 + Math.random() * 0.2; // 매번 살짝 다르게
+
+      // 타격음: 잡음을 대역 필터로 걸러 아주 짧게
+      const noise = audioCtx.createBufferSource();
+      noise.buffer = noiseBuffer;
+      const band = audioCtx.createBiquadFilter();
+      band.type = 'bandpass';
+      band.frequency.value = 2600 * vary;
+      band.Q.value = 1.2;
+      const clickGain = audioCtx.createGain();
+      clickGain.gain.setValueAtTime(0.9, t);
+      clickGain.gain.exponentialRampToValueAtTime(0.001, t + 0.035);
+      noise.connect(band).connect(clickGain).connect(audioCtx.destination);
+      noise.start(t);
+      noise.stop(t + 0.05);
+
+      // 나무판 울림: 낮은 음을 아주 빠르게 감쇠
+      const body = audioCtx.createOscillator();
+      body.type = 'sine';
+      body.frequency.setValueAtTime(320 * vary, t);
+      body.frequency.exponentialRampToValueAtTime(140 * vary, t + 0.04);
+      const bodyGain = audioCtx.createGain();
+      bodyGain.gain.setValueAtTime(0.35, t);
+      bodyGain.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+      body.connect(bodyGain).connect(audioCtx.destination);
+      body.start(t);
+      body.stop(t + 0.07);
     } catch { /* 소리 미지원 */ }
   }
 
