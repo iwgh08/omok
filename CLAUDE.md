@@ -48,3 +48,9 @@ Windows PowerShell에서는 실행 정책 때문에 `npm`이 막힐 수 있다. 
 - 서버 → 클라이언트: `state`, `chat`, `chatHistory`, `errorMsg`, `kicked`, `stonePlaced`
 
 **`public/client.js`**는 canvas에 바둑판을 그린다. devicePixelRatio에 맞춰 해상도를 조정하고, ResizeObserver로 크기 변화를 따라간다. 터치 기기에서는 같은 자리를 두 번 탭해야 돌이 놓이고, 마우스는 한 번 클릭하면 놓인다. 소켓이 다시 연결되면 `currentRoom`에 자동으로 다시 입장한다.
+
+**차례·요청 표시 (`public/client.js`)**
+- 화면은 `render()`가 현재 상태만 보고 다시 그린다. 상태가 "바뀌는 순간"에 한 번만 보여 줄 것들은 `notifyChanges(prev, s)`가 이전 상태와 비교해서 처리한다. 대국 시작, 내 차례, 승패 배지(`showBadge`), 내 무르기 요청 결과 토스트가 여기에 해당한다. 관전자에게는 표시하지 않는다.
+- 내 차례에는 `#statusBar`와 `#boardStage`에 `my-turn` 클래스를 붙여 주황색 표시줄과 바둑판 테두리 빛을 켠다.
+- 상대의 무르기·재대국 요청은 바둑판 위의 `#requestCard` 하나로 보여 준다. `requestMode`(`'undo' | 'rematch'`)에 따라 `#requestYes`/`#requestNo` 버튼의 동작이 바뀐다. 재대국 카드는 '나중에'를 누르면 `rematchDismissed`로 숨긴다.
+- 사용자 결정: 돌 놓는 소리는 처음의 삼각파 '뚁' 소리(`playClick`)를 유지한다. 잡음으로 만든 '탁' 소리는 시도했다가 되돌렸다. '띵동' 알림음과 탭 제목 깜빡임도 넣었다가 사용자가 원하지 않아 뺐으니 다시 넣지 않는다.
