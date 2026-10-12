@@ -304,13 +304,16 @@ io.on('connection', (socket) => {
     return { ok: true, code: r.code };
   }
 
-  socket.on('createRoom', ({ name, clientId, totalTime } = {}, cb) => {
+  // 주의: 클라이언트가 null 등을 보내도 서버가 죽지 않도록 `data || {}`로 꺼낸다
+  socket.on('createRoom', (data, cb) => {
+    const { name, clientId, totalTime } = data || {};
     if (typeof cb !== 'function' || !clientId) return;
     const r = createRoom(Number(totalTime));
     cb(join(r.code, cleanName(name), String(clientId)));
   });
 
-  socket.on('joinRoom', ({ code, name, clientId } = {}, cb) => {
+  socket.on('joinRoom', (data, cb) => {
+    const { code, name, clientId } = data || {};
     if (typeof cb !== 'function' || !clientId) return;
     cb(join(code, cleanName(name), String(clientId)));
   });
@@ -318,7 +321,8 @@ io.on('connection', (socket) => {
   socket.on('leaveRoom', () => leaveCurrent(true));
   socket.on('disconnect', () => leaveCurrent(false));
 
-  socket.on('place', ({ x, y } = {}) => {
+  socket.on('place', (data) => {
+    const { x, y } = data || {};
     if (!room || room.status !== 'playing') return;
     const color = myColor();
     if (!color) return fail('관전자는 돌을 둘 수 없습니다.');
@@ -357,7 +361,8 @@ io.on('connection', (socket) => {
     broadcast(room);
   });
 
-  socket.on('undoReply', ({ accept } = {}) => {
+  socket.on('undoReply', (data) => {
+    const { accept } = data || {};
     if (!room || room.status !== 'playing' || !room.undoRequest) return;
     const color = myColor();
     if (!color || color === room.undoRequest) return;
@@ -401,7 +406,8 @@ io.on('connection', (socket) => {
     broadcast(room);
   });
 
-  socket.on('chat', ({ text } = {}) => {
+  socket.on('chat', (data) => {
+    const { text } = data || {};
     const m = me();
     if (!m) return;
     const t = String(text || '').trim().slice(0, 200);

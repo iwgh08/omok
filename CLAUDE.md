@@ -12,8 +12,9 @@ Windows PowerShell에서는 실행 정책 때문에 `npm`이 막힐 수 있다. 
 
 - `npm install`: 의존성 설치
 - `npm start`: http://localhost:3000 에서 서버 실행 (`PORT`로 포트 변경 가능)
-- `npm test`: 렌주 판정 단위 테스트 실행 (`node --test test/renju.test.js`)
+- `npm test`: 렌주 판정 단위 테스트(`test/renju.test.js`)와 서버 통합 테스트(`test/server.test.js`) 실행. 서버 테스트는 `server.js`를 무작위 포트(3900번대)로 직접 띄우고 `socket.io-client`(devDependency)로 접속해 대국 흐름을 확인한다.
 - 테스트 하나만 실행: `node --test --test-name-pattern="4-4" test/renju.test.js`
+- `/ship`: 바뀐 코드 검토 → 테스트 → `git add/commit/push`를 한 번에 진행하는 프로젝트 명령어 (`.claude/skills/ship/SKILL.md`)
 
 린터와 번들러는 없다. 로컬에서 대국을 시험하려면 일반 창과 시크릿 창을 하나씩 연다. 플레이어는 localStorage에 저장된 `clientId`로 구분하므로, 같은 브라우저 프로필의 두 탭은 같은 플레이어로 취급된다.
 
@@ -43,7 +44,7 @@ Windows PowerShell에서는 실행 정책 때문에 `npm`이 막힐 수 있다. 
 - 클라이언트는 `state.clocks`를 받은 시각을 기준으로, 현재 차례인 쪽 시계만 화면에서 줄여 보여준다.
 - 무르기는 상대가 수락해야 한다. 상대 차례면 1수, 요청한 사람 차례면 2수를 되돌린다. 흑의 첫 수(천원)는 무를 수 없다.
 
-**소켓 이벤트**
+**소켓 이벤트** (서버 핸들러는 받은 데이터를 `data || {}`로 꺼낸다. 인자 기본값 `({ x } = {})`은 `null`을 막지 못해서, `null` 하나로 서버 전체가 꺼질 수 있다.)
 - 클라이언트 → 서버: `createRoom`, `joinRoom`(둘 다 응답 콜백 사용), `leaveRoom`, `place`, `undoRequest`, `undoReply`, `resign`, `rematch`, `chat`
 - 서버 → 클라이언트: `state`, `chat`, `chatHistory`, `errorMsg`, `kicked`, `stonePlaced`
 
