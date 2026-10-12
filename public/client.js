@@ -1,9 +1,11 @@
 (() => {
-  const { SIZE, EMPTY, BLACK, WHITE } = Renju;
-  const CENTER = Math.floor(SIZE / 2);
+  const { BLACK } = Renju;
   const COLOR_NAME = { 1: '흑', 2: '백' };
+  const Q_COLORS = window.QUORIDOR_COLORS;
+  const Q_NAMES = window.QUORIDOR_COLOR_NAMES;
   const REASON_TEXT = {
     five: '5목 완성',
+    goal: '목표 도달',
     timeout: '시간 초과',
     resign: '기권',
     disconnect: '연결 끊김',
@@ -30,9 +32,6 @@
   let state = null;
   let currentRoom = null;
   let stateReceivedAt = 0; // 마지막 state를 받은 시각 (내 차례 시계를 화면에서 줄이는 기준)
-  let hover = null;       // 마우스 미리보기 위치
-  let touchPick = null;   // 터치: 첫 탭으로 선택한 위치
-  let forbiddenCache = { key: '', list: [] };
   let autoJoinTried = false;
 
   // ---------- 로비 ----------
@@ -41,6 +40,15 @@
   nameInput.value = load('omok.name') || '';
   const params = new URLSearchParams(location.search);
   if (params.get('room')) codeInput.value = params.get('room').toUpperCase();
+
+  const gameSelect = $('gameSelect');
+  const playersSelect = $('playersSelect');
+  gameSelect.value = load('omok.game') === 'quoridor' ? 'quoridor' : 'omok';
+  playersSelect.value = ['2', '3', '4'].includes(load('omok.players')) ? load('omok.players') : '2';
+  const syncGameSelect = () => playersSelect.classList.toggle('hidden', gameSelect.value !== 'quoridor');
+  gameSelect.onchange = () => { save('omok.game', gameSelect.value); syncGameSelect(); };
+  playersSelect.onchange = () => save('omok.players', playersSelect.value);
+  syncGameSelect();
 
   function getName() {
     const name = nameInput.value.trim();
@@ -66,7 +74,12 @@
   $('createBtn').onclick = () => {
     const name = getName();
     if (!name) return;
-    socket.emit('createRoom', { name, clientId, totalTime: Number($('timeSelect').value) }, onJoined);
+    socket.emit('createRoom', {
+      name, clientId,
+      totalTime: Number($('timeSelect').value),
+      game: gameSelect.value,
+      players: Number(playersSelect.value),
+    }, onJoined);
   };
 
   function joinByCode() {
@@ -92,8 +105,8 @@
   }
 
   $('leaveBtn').onclick = () => {
-    if (state && state.status === 'playing' && state.you.color &&
-        !confirm('대국 중에 나가면 패배 처리됩니다. 나가시겠습니까?')) return;
+    if (state && amPlaying() &&
+        !confirm(`대국 중에 나가면 ${isQ() ? '탈락' : '패배'} 처리됩니다. 나가시겠습니까?`)) return;
     socket.emit('leaveRoom');
     backToLobby();
   };
@@ -129,7 +142,7 @@
     const prev = state;
     state = s;
     stateReceivedAt = Date.now();
-    touchPick = null;
+    board().reset();
     render();
     notifyChanges(prev, s);
   });
@@ -150,7 +163,15 @@
       div.textContent = msg.text;
     } else {
       const b = document.createElement('b');
-      b.textContent = (msg.color ? (msg.color === BLACK ? '● ' : '○ ') : '👀 ') + msg.name;
+      if (msg.seat !== undefined) {
+        // 쿼리도: 말 색 점
+        const dot = document.createElement('span');
+        dot.textContent = msg.seat >= 0 ? '● ' : '👀 ';
+        if (msg.seat >= 0) dot.style.color = Q_COLORS[msg.seat];
+        b.append(dot, msg.name);
+      } else {
+        b.textContent = (msg.color ? (msg.color === BLACK ? '● ' : '○ ') : '👀 ') + msg.name;
+      }
       div.append(b, document.createTextNode(msg.text));
     }
     log.appendChild(div);
@@ -183,20 +204,27 @@
   $('soundToggle').checked = load('omok.sound') !== 'off';
   $('soundToggle').onchange = () => save('omok.sound', $('soundToggle').checked ? 'on' : 'off');
 
-  // ---------- 화면 갱신 ----------
+  // ---------- 게임별 공통 판단 ----------
+  // 오목은 색(1|2)으로, 쿼리도는 자리 번호로 차례·시계·승자를 구분한다
+  const isQ = () => state.game === 'quoridor';
+  const myKey = () => (isQ() ? state.you.seat : state.you.color);
+  // 지금 대국에 참여 중인지 (쿼리도는 탈락하지 않았는지)
+  function amPlaying() {
+    const s = state;
+    if (s.status !== 'playing' || s.you.seat < 0) return false;
+    return isQ() ? !!s.q.pawns[s.you.seat] : !!s.you.color;
+  }
+  const moveCount = (s) => (s.game === 'quoridor' ? s.moveCount : s.moves.length);
+
   function playerName(color) {
     const seat = state.seats.find((s) => s && s.color === color);
     return seat ? seat.name : COLOR_NAME[color];
   }
+  const qName = (p) => state.names[p] || state.seats[p]?.name || Q_NAMES[p];
 
-  function render() {
-    if (!state) return;
-    const s = state;
+  // ---------- 화면 갱신 ----------
+  function omokStatus(s) {
     const me = s.you;
-    $('timeLimitLabel').textContent = `각자 ${s.totalTime / 60}분`;
-
-    // 상태 문구
-    const bar = $('statusBar');
     let text = '';
     let myTurn = false;
     if (s.status === 'waiting') {
@@ -217,26 +245,68 @@
       }
       if (me.seat >= 0 && s.rematch.length === 1 && !s.rematch.includes(me.seat)) text += ' · 상대가 재대국을 원합니다';
     }
+    return { text, myTurn };
+  }
+
+  function quoridorStatus(s) {
+    const seat = s.you.seat;
+    let text = '';
+    let myTurn = false;
+    if (s.status === 'waiting') {
+      const filled = s.seats.filter(Boolean).length;
+      text = `참가자를 기다리는 중… (${filled}/${s.players}명) "초대 링크 복사"로 친구를 불러 주세요`;
+      if (s.winner !== null) text = `지난 대국 ${qName(s.winner)} 승리 · ${text}`;
+    } else if (s.status === 'playing') {
+      const alive = seat >= 0 && !!s.q.pawns[seat];
+      myTurn = alive && s.turn === seat;
+      text = myTurn ? `내 차례입니다 (${Q_NAMES[seat]}) · 말을 움직이거나 벽을 놓으세요`
+        : `${qName(s.turn)} (${Q_NAMES[s.turn]}) 차례`;
+      if (seat < 0) text = '관전 중 · ' + text;
+      else if (!alive) text = '탈락 · ' + text;
+    } else if (s.status === 'ended') {
+      const who = seat >= 0 ? (s.winner === seat ? '승리했습니다!' : `패배했습니다 · ${qName(s.winner)} 승리`)
+        : `${qName(s.winner)} (${Q_NAMES[s.winner]}) 승리`;
+      text = `${who} — ${REASON_TEXT[s.reason]}`;
+      if (seat >= 0 && s.rematch.length && !s.rematch.includes(seat)) text += ` · 재대국 요청 ${s.rematch.length}/${s.players}`;
+    }
+    return { text, myTurn };
+  }
+
+  function render() {
+    if (!state) return;
+    const s = state;
+    const me = s.you;
+    document.body.dataset.game = s.game;
+    $('timeLimitLabel').textContent = `${isQ() ? `쿼리도 ${s.players}인 · ` : ''}각자 ${s.totalTime / 60}분`;
+
+    // 상태 문구
+    const bar = $('statusBar');
+    const { text, myTurn } = isQ() ? quoridorStatus(s) : omokStatus(s);
     bar.textContent = myTurn ? `● ${text}` : text;
     bar.classList.toggle('my-turn', myTurn);
     $('boardStage').classList.toggle('my-turn', myTurn);
 
-    // 플레이어 카드 (흑이 위)
-    const order = [0, 1];
-    if (s.seats[1] && s.seats[1].color === BLACK) order.reverse();
-    order.forEach((seatIdx, slot) => renderPlayer($(`player${slot}`), s.seats[seatIdx], seatIdx === me.seat));
+    renderPlayers();
 
-    // 상대의 요청 알림 카드
-    const opponentSeat = me.seat >= 0 ? 1 - me.seat : -1;
-    if (s.status === 'playing' && s.undoRequest && me.color && me.color !== s.undoRequest) {
+    // 다른 대국자의 요청 알림 카드
+    if (s.status === 'playing' && s.undoRequest !== null && amPlaying() && myKey() !== s.undoRequest &&
+        !(isQ() && s.undoAccepts.includes(me.seat))) {
       requestMode = 'undo';
-      $('requestText').textContent = `${playerName(s.undoRequest)} 님이 무르기를 요청했습니다`;
+      if (isQ()) {
+        const need = s.q.pawns.filter(Boolean).length - 1;
+        $('requestText').textContent = `${qName(s.undoRequest)} 님이 무르기를 요청했습니다 (수락 ${s.undoAccepts.length}/${need})`;
+      } else {
+        $('requestText').textContent = `${playerName(s.undoRequest)} 님이 무르기를 요청했습니다`;
+      }
       $('requestYes').textContent = '수락';
       $('requestNo').textContent = '거절';
-    } else if (s.status === 'ended' && opponentSeat >= 0 && s.rematch.includes(opponentSeat) &&
-               !s.rematch.includes(me.seat) && !rematchDismissed) {
+    } else if (s.status === 'ended' && me.seat >= 0 && s.rematch.length && !s.rematch.includes(me.seat) &&
+               !rematchDismissed) {
       requestMode = 'rematch';
-      $('requestText').textContent = `${s.seats[opponentSeat].name} 님이 재대국을 원합니다 (흑백 교대)`;
+      const names = s.rematch.map((i) => s.seats[i]?.name).filter(Boolean).join(', ');
+      $('requestText').textContent = isQ()
+        ? `${names} 님이 재대국을 원합니다 (${s.rematch.length}/${s.players}, 차례 순서 교대)`
+        : `${names} 님이 재대국을 원합니다 (흑백 교대)`;
       $('requestYes').textContent = '재대국 하기';
       $('requestNo').textContent = '나중에';
     } else {
@@ -245,9 +315,10 @@
     $('requestCard').classList.toggle('hidden', !requestMode);
 
     // 버튼
-    const playing = s.status === 'playing' && !!me.color;
-    $('undoBtn').disabled = !playing || !!s.undoRequest;
-    $('undoBtn').textContent = s.undoRequest === me.color && me.color ? '무르기 요청 중…' : '무르기';
+    const playing = amPlaying();
+    const requesting = playing && s.undoRequest === myKey();
+    $('undoBtn').disabled = !playing || s.undoRequest !== null;
+    $('undoBtn').textContent = requesting ? '무르기 요청 중…' : '무르기';
     $('resignBtn').disabled = !playing;
     const canRematch = s.status === 'ended' && me.seat >= 0;
     $('rematchBtn').classList.toggle('hidden', !canRematch);
@@ -255,7 +326,11 @@
     $('resignBtn').classList.toggle('hidden', canRematch);
     const waitingRematch = s.rematch.includes(me.seat);
     $('rematchBtn').disabled = waitingRematch;
-    $('rematchBtn').textContent = waitingRematch ? '상대 대기 중…' : '재대국 (흑백 교대)';
+    if (isQ()) {
+      $('rematchBtn').textContent = waitingRematch ? `다른 사람 대기 중… (${s.rematch.length}/${s.players})` : '재대국 (순서 교대)';
+    } else {
+      $('rematchBtn').textContent = waitingRematch ? '상대 대기 중…' : '재대국 (흑백 교대)';
+    }
 
     $('spectators').textContent = s.spectators.length ? `관전자 ${s.spectators.length}명: ${s.spectators.join(', ')}` : '';
 
@@ -263,19 +338,64 @@
     drawBoard();
   }
 
-  function renderPlayer(el, seat, isMe) {
+  // 플레이어 카드: 오목은 흑이 위, 쿼리도는 차례 순서대로
+  function renderPlayers() {
+    const s = state;
+    const cards = [];
+    if (isQ()) {
+      for (const p of Quoridor.turnOrder(s.players)) {
+        const seat = s.seats[p];
+        const started = s.status !== 'waiting';
+        cards.push({
+          name: seat ? seat.name : started ? qName(p) : null,
+          isMe: p === s.you.seat,
+          connected: seat ? seat.connected : null,
+          active: s.status === 'playing' && s.turn === p,
+          out: started && !s.q.pawns[p],
+          stoneColor: Q_COLORS[p],
+          clockKey: seat || started ? p : null,
+          extra: `벽 ${started ? s.q.wallsLeft[p] : Quoridor.WALLS[s.players]}`,
+        });
+      }
+    } else {
+      const order = [0, 1];
+      if (s.seats[1] && s.seats[1].color === BLACK) order.reverse();
+      for (const i of order) {
+        const seat = s.seats[i];
+        cards.push({
+          name: seat ? seat.name : null,
+          isMe: i === s.you.seat,
+          connected: seat ? seat.connected : null,
+          active: !!(seat && s.status === 'playing' && seat.color === s.turn),
+          stoneClass: `c${seat ? seat.color : 0}`,
+          clockKey: seat ? seat.color : null,
+        });
+      }
+    }
+    const box = $('players');
+    while (box.children.length < cards.length) box.appendChild(Object.assign(document.createElement('div'), { className: 'player' }));
+    while (box.children.length > cards.length) box.lastChild.remove();
+    cards.forEach((c, i) => renderPlayer(box.children[i], c));
+  }
+
+  function renderPlayer(el, c) {
     el.innerHTML = '';
-    el.classList.toggle('active', !!(seat && state.status === 'playing' && seat.color === state.turn));
+    el.classList.toggle('active', c.active);
+    el.classList.toggle('out', !!c.out);
     const stone = document.createElement('span');
-    stone.className = `stone c${seat ? seat.color : 0}`;
+    stone.className = `stone ${c.stoneClass || ''}`;
+    if (c.stoneColor) stone.style.background = c.stoneColor;
     const name = document.createElement('span');
     name.className = 'name';
-    if (seat) {
-      name.textContent = seat.name;
-      if (isMe) {
+    if (c.name) {
+      name.textContent = c.name;
+      const tags = [];
+      if (c.isMe) tags.push('(나)');
+      if (c.out) tags.push('탈락');
+      if (tags.length) {
         const tag = document.createElement('span');
         tag.className = 'me';
-        tag.textContent = '(나)';
+        tag.textContent = tags.join(' ');
         name.appendChild(tag);
       }
     } else {
@@ -283,26 +403,34 @@
       name.style.color = 'var(--muted)';
     }
     el.append(stone, name);
-    if (seat) {
+    if (c.extra) {
+      const extra = document.createElement('span');
+      extra.className = 'extra';
+      extra.textContent = c.extra;
+      el.appendChild(extra);
+    }
+    if (c.connected !== null) {
       const dot = document.createElement('span');
-      dot.className = 'dot' + (seat.connected ? '' : ' off');
-      dot.title = seat.connected ? '접속 중' : '연결 끊김';
+      dot.className = 'dot' + (c.connected ? '' : ' off');
+      dot.title = c.connected ? '접속 중' : '연결 끊김';
       el.appendChild(dot);
+    }
+    if (c.clockKey !== null) {
       const time = document.createElement('span');
       time.className = 'time';
-      time.dataset.color = seat.color;
+      time.dataset.key = c.clockKey;
       el.appendChild(time);
       const bar = document.createElement('span');
       bar.className = 'bar';
-      bar.dataset.color = seat.color;
+      bar.dataset.key = c.clockKey;
       el.appendChild(bar);
     }
   }
 
   // 남은 시간: 서버가 보낸 값에서, 지금 차례인 쪽만 받은 뒤 흐른 시간을 뺌
-  function clockOf(color) {
-    const base = state.clocks[color];
-    const running = state.status === 'playing' && color === state.turn;
+  function clockOf(key) {
+    const base = state.clocks[key];
+    const running = state.status === 'playing' && key === state.turn;
     return Math.max(0, base - (running ? Date.now() - stateReceivedAt : 0));
   }
 
@@ -313,25 +441,34 @@
 
   function updateTimers() {
     if (!state) return;
-    const started = state.status !== 'waiting' || state.moves.length > 0;
+    const started = state.status !== 'waiting' || moveCount(state) > 0;
+    const total = state.totalTime * 1000;
     document.querySelectorAll('.player .time').forEach((el) => {
-      const color = Number(el.dataset.color);
-      const ms = color && started ? clockOf(color) : state.totalTime * 1000;
+      const key = Number(el.dataset.key);
+      const ms = started ? clockOf(key) : total;
       el.textContent = formatClock(ms);
-      el.classList.toggle('low', state.status === 'playing' && color === state.turn && ms <= 30000);
+      el.classList.toggle('low', state.status === 'playing' && key === state.turn && ms <= 30000);
     });
     document.querySelectorAll('.player .bar').forEach((el) => {
-      const color = Number(el.dataset.color);
-      const ms = color && started ? clockOf(color) : state.totalTime * 1000;
-      el.style.width = `${(ms / (state.totalTime * 1000)) * 100}%`;
-      el.style.opacity = state.status === 'playing' && color === state.turn ? '1' : '0.35';
+      const key = Number(el.dataset.key);
+      const ms = started ? clockOf(key) : total;
+      el.style.width = `${(ms / total) * 100}%`;
+      el.style.opacity = state.status === 'playing' && key === state.turn ? '1' : '0.35';
     });
   }
   setInterval(updateTimers, 100);
 
-  // ---------- 바둑판 ----------
+  // ---------- 판 (그리기와 입력은 게임별 모듈) ----------
   const canvas = $('board');
   const ctx = canvas.getContext('2d');
+  const env = {
+    canvas, ctx, $, toast,
+    get state() { return state; },
+    emit: (ev, data) => socket.emit(ev, data),
+  };
+  const boards = { omok: OmokBoard(env), quoridor: QuoridorBoard(env) };
+  const board = () => boards[state ? state.game : 'omok'];
+  function drawBoard() { board().draw(); }
 
   function resizeBoard() {
     const dpr = window.devicePixelRatio || 1;
@@ -343,204 +480,9 @@
   }
   new ResizeObserver(resizeBoard).observe(canvas);
 
-  function geometry() {
-    const w = canvas.width;
-    const cell = w / (SIZE + 1);
-    return { w, cell, pos: (i) => cell + i * cell };
-  }
-
-  function forbiddenPoints() {
-    if (!state || state.status !== 'playing' || state.turn !== BLACK || state.moves.length === 0) return [];
-    const key = state.moves.map((m) => m.join(',')).join(';');
-    if (forbiddenCache.key !== key) {
-      forbiddenCache = { key, list: Renju.allForbidden(state.board.slice()) };
-    }
-    return forbiddenCache.list;
-  }
-
-  function winningLine() {
-    if (!state || state.status !== 'ended' || state.reason !== 'five' || !state.moves.length) return null;
-    const [x, y] = state.moves[state.moves.length - 1];
-    const color = state.board[y * SIZE + x];
-    const at = (i, j) => (i >= 0 && j >= 0 && i < SIZE && j < SIZE ? state.board[j * SIZE + i] : -1);
-    for (const [dx, dy] of [[1, 0], [0, 1], [1, 1], [1, -1]]) {
-      let a = 0, b = 0;
-      while (at(x + (a + 1) * dx, y + (a + 1) * dy) === color) a++;
-      while (at(x - (b + 1) * dx, y - (b + 1) * dy) === color) b++;
-      if (a + b + 1 >= 5) return [[x - b * dx, y - b * dy], [x + a * dx, y + a * dy]];
-    }
-    return null;
-  }
-
-  function drawStone(x, y, color, alpha = 1) {
-    const { cell, pos } = geometry();
-    const cx = pos(x), cy = pos(y), r = cell * 0.46;
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.shadowColor = 'rgba(0,0,0,0.35)';
-    ctx.shadowBlur = cell * 0.12;
-    ctx.shadowOffsetY = cell * 0.05;
-    const g = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.35, r * 0.1, cx, cy, r);
-    if (color === BLACK) { g.addColorStop(0, '#666'); g.addColorStop(1, '#0d0d0d'); }
-    else { g.addColorStop(0, '#ffffff'); g.addColorStop(1, '#cfcfcf'); }
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  function drawBoard() {
-    if (!canvas.width) return;
-    const { w, cell, pos } = geometry();
-    const css = getComputedStyle(document.documentElement);
-    ctx.clearRect(0, 0, w, w);
-    ctx.fillStyle = css.getPropertyValue('--wood').trim() || '#e2b866';
-    ctx.fillRect(0, 0, w, w);
-
-    // 격자
-    ctx.strokeStyle = css.getPropertyValue('--wood-line').trim() || '#5a3e1b';
-    ctx.lineWidth = Math.max(1, w / 700);
-    ctx.beginPath();
-    for (let i = 0; i < SIZE; i++) {
-      ctx.moveTo(pos(0), pos(i)); ctx.lineTo(pos(SIZE - 1), pos(i));
-      ctx.moveTo(pos(i), pos(0)); ctx.lineTo(pos(i), pos(SIZE - 1));
-    }
-    ctx.stroke();
-    ctx.fillStyle = ctx.strokeStyle;
-    for (const [x, y] of [[3, 3], [11, 3], [7, 7], [3, 11], [11, 11]]) {
-      ctx.beginPath();
-      ctx.arc(pos(x), pos(y), cell * 0.1, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // 좌표
-    ctx.font = `${cell * 0.32}px 'Noto Sans KR', sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.globalAlpha = 0.6;
-    for (let i = 0; i < SIZE; i++) {
-      ctx.fillText(String.fromCharCode(65 + i), pos(i), cell * 0.4);
-      ctx.fillText(String(SIZE - i), cell * 0.4, pos(i));
-    }
-    ctx.globalAlpha = 1;
-
-    if (!state) return;
-    const board = state.board;
-
-    // 돌
-    const showNum = $('numToggle').checked;
-    const order = new Map(state.moves.map(([x, y], i) => [y * SIZE + x, i + 1]));
-    for (let y = 0; y < SIZE; y++) {
-      for (let x = 0; x < SIZE; x++) {
-        const c = board[y * SIZE + x];
-        if (c === EMPTY) continue;
-        drawStone(x, y, c);
-        if (showNum && order.has(y * SIZE + x)) {
-          ctx.fillStyle = c === BLACK ? '#fff' : '#111';
-          ctx.font = `bold ${cell * 0.36}px 'Noto Sans KR', sans-serif`;
-          ctx.fillText(order.get(y * SIZE + x), pos(x), pos(y) + cell * 0.02);
-        }
-      }
-    }
-
-    // 마지막 수 표시
-    if (state.moves.length && !showNum) {
-      const [lx, ly] = state.moves[state.moves.length - 1];
-      ctx.fillStyle = '#e53935';
-      ctx.beginPath();
-      ctx.arc(pos(lx), pos(ly), cell * 0.12, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // 금수 표시
-    if ($('forbidToggle').checked) {
-      ctx.strokeStyle = '#e53935';
-      ctx.lineWidth = Math.max(2, cell * 0.08);
-      const d = cell * 0.18;
-      for (const { x, y } of forbiddenPoints()) {
-        ctx.beginPath();
-        ctx.moveTo(pos(x) - d, pos(y) - d); ctx.lineTo(pos(x) + d, pos(y) + d);
-        ctx.moveTo(pos(x) + d, pos(y) - d); ctx.lineTo(pos(x) - d, pos(y) + d);
-        ctx.stroke();
-      }
-    }
-
-    // 첫 수 안내
-    if (state.status === 'playing' && state.moves.length === 0 && state.you.color === BLACK) {
-      ctx.strokeStyle = '#e53935';
-      ctx.lineWidth = Math.max(2, cell * 0.06);
-      ctx.beginPath();
-      ctx.arc(pos(CENTER), pos(CENTER), cell * 0.46, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    // 미리보기 돌
-    const preview = touchPick || hover;
-    if (preview && canPlace(preview.x, preview.y, false)) {
-      drawStone(preview.x, preview.y, state.you.color, touchPick ? 0.7 : 0.45);
-    }
-
-    // 승리 줄
-    const line = winningLine();
-    if (line) {
-      ctx.strokeStyle = 'rgba(229,57,53,0.85)';
-      ctx.lineWidth = cell * 0.12;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(pos(line[0][0]), pos(line[0][1]));
-      ctx.lineTo(pos(line[1][0]), pos(line[1][1]));
-      ctx.stroke();
-      ctx.lineCap = 'butt';
-    }
-  }
-
-  function canPlace(x, y, explain) {
-    const s = state;
-    const say = (m) => { if (explain) toast(m); return false; };
-    if (!s || s.status !== 'playing') return false;
-    if (!s.you.color) return say('관전 중에는 돌을 둘 수 없습니다.');
-    if (s.you.color !== s.turn) return say('상대 차례입니다.');
-    if (s.board[y * SIZE + x] !== EMPTY) return false;
-    if (s.moves.length === 0 && (x !== CENTER || y !== CENTER)) return say('흑의 첫 수는 정중앙(천원)에 두어야 합니다.');
-    if (s.you.color === BLACK) {
-      const f = forbiddenPoints().find((p) => p.x === x && p.y === y);
-      if (f) return say(`${Renju.FORBIDDEN_NAMES[f.type]} 자리입니다.`);
-    }
-    return true;
-  }
-
-  function pointFromEvent(e) {
-    const rect = canvas.getBoundingClientRect();
-    const scale = canvas.width / rect.width;
-    const { cell } = geometry();
-    const x = Math.round(((e.clientX - rect.left) * scale - cell) / cell);
-    const y = Math.round(((e.clientY - rect.top) * scale - cell) / cell);
-    if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return null;
-    return { x, y };
-  }
-
-  canvas.addEventListener('pointermove', (e) => {
-    if (e.pointerType !== 'mouse') return;
-    const p = pointFromEvent(e);
-    if (p?.x !== hover?.x || p?.y !== hover?.y) { hover = p; drawBoard(); }
-  });
-  canvas.addEventListener('pointerleave', () => { hover = null; drawBoard(); });
-
-  canvas.addEventListener('pointerup', (e) => {
-    const p = pointFromEvent(e);
-    if (!p || !canPlace(p.x, p.y, true)) return;
-    // 터치는 실수 방지를 위해 같은 자리를 두 번 탭해야 착수
-    if (e.pointerType !== 'mouse' && !(touchPick && touchPick.x === p.x && touchPick.y === p.y)) {
-      touchPick = p;
-      drawBoard();
-      return;
-    }
-    touchPick = null;
-    hover = null;
-    socket.emit('place', p);
-  });
-
+  canvas.addEventListener('pointermove', (e) => e.pointerType === 'mouse' && board().pointerMove(e));
+  canvas.addEventListener('pointerleave', () => board().pointerLeave());
+  canvas.addEventListener('pointerup', (e) => board().pointerUp(e));
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', drawBoard);
 
   // ---------- 효과음 / 알림 ----------
@@ -563,40 +505,44 @@
     } catch { /* 소리 미지원 */ }
   }
 
-  // ---------- 상태 변화 표시 (내 차례, 상대 요청 등) ----------
+  // ---------- 상태 변화 표시 (내 차례, 다른 사람 요청 등) ----------
   function notifyChanges(prev, s) {
     const me = s.you;
-    if (!me.color && me.seat < 0) return; // 관전자는 표시 없음
-    const opponentSeat = me.seat >= 0 ? 1 - me.seat : -1;
+    if (me.seat < 0) return; // 관전자는 표시 없음
+    const q = s.game === 'quoridor';
+    const key = q ? me.seat : me.color;
     const wasPlaying = prev && prev.code === s.code && prev.status === 'playing';
 
     // 새 대국 시작
     if (s.status === 'playing' && !wasPlaying) {
       rematchDismissed = false;
-      showBadge(`대국 시작! 나는 ${COLOR_NAME[me.color]}`, 1600);
+      showBadge(`대국 시작! 나는 ${q ? Q_NAMES[me.seat] : COLOR_NAME[me.color]}`, 1600);
       return;
     }
 
     // 대국 종료
     if (s.status === 'ended' && wasPlaying) {
-      showBadge(!s.winner ? '무승부' : s.winner === me.color ? '승리! 🎉' : '패배', 1800);
+      showBadge(!q && !s.winner ? '무승부' : s.winner === key ? '승리! 🎉' : '패배', 1800);
     }
 
     if (s.status === 'playing' && wasPlaying) {
+      const alive = !q || !!s.q.pawns[me.seat];
+      // 탈락
+      if (q && !alive && prev.q.pawns[me.seat]) showBadge('탈락', 1600);
       // 내 차례가 됨
-      const moved = prev.turn !== s.turn || prev.moves.length !== s.moves.length;
-      if (me.color === s.turn && moved) showBadge('내 차례!');
-      // 내 무르기 요청의 결과
-      if (prev.undoRequest === me.color && !s.undoRequest) {
-        if (s.moves.length < prev.moves.length) toast('무르기가 수락되었습니다');
-        else if (s.moves.length > prev.moves.length) toast('상대가 무르기 대신 수를 두었습니다');
-        else toast('상대가 무르기를 거절했습니다');
+      const moved = prev.turn !== s.turn || moveCount(prev) !== moveCount(s);
+      if (alive && key === s.turn && moved) showBadge('내 차례!');
+      // 내 무르기 요청의 결과 (누가 탈락해서 취소된 경우는 제외)
+      const outChanged = q && s.q.pawns.filter(Boolean).length !== prev.q.pawns.filter(Boolean).length;
+      if (prev.undoRequest === key && s.undoRequest === null && !outChanged) {
+        if (moveCount(s) < moveCount(prev)) toast('무르기가 수락되었습니다');
+        else if (moveCount(s) > moveCount(prev)) toast(q ? '다른 사람이 무르기 대신 수를 두었습니다' : '상대가 무르기 대신 수를 두었습니다');
+        else toast(q ? '무르기가 거절되었습니다' : '상대가 무르기를 거절했습니다');
       }
     }
 
-    // 상대가 재대국 요청
-    if (s.status === 'ended' && opponentSeat >= 0 && s.rematch.includes(opponentSeat) &&
-        !(prev && prev.rematch.includes(opponentSeat))) {
+    // 다른 대국자가 재대국 요청
+    if (s.status === 'ended' && s.rematch.some((i) => i !== me.seat && !(prev && prev.rematch.includes(i)))) {
       rematchDismissed = false;
       render();
     }

@@ -1,11 +1,11 @@
 {
   "name": "renju-omok",
   "version": "1.0.0",
-  "description": "친구와 함께하는 렌주룰 온라인 오목",
+  "description": "친구와 함께하는 온라인 오목 · 쿼리도",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test/renju.test.js test/server.test.js"
+    "test": "node --test test/renju.test.js test/quoridor.test.js test/server.test.js"
   },
   "engines": {
     "node": ">=18"

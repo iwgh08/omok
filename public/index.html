@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>렌주 오목</title>
+  <title>오목 · 쿼리도</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
@@ -12,8 +12,8 @@
   <!-- 로비 -->
   <main id="lobby" class="lobby">
     <div class="lobby-card">
-      <h1><span class="stone-icon black"></span><span class="stone-icon white"></span> 렌주 오목</h1>
-      <p class="sub">친구와 함께하는 렌주룰 온라인 오목</p>
+      <h1><span class="stone-icon black"></span><span class="stone-icon white"></span> 오목 · 쿼리도</h1>
+      <p class="sub">친구와 함께하는 온라인 보드게임</p>
 
       <label class="field">
         <span>닉네임</span>
@@ -22,6 +22,17 @@
 
       <section class="lobby-section">
         <h2>방 만들기</h2>
+        <div class="row game-row">
+          <select id="gameSelect" aria-label="게임 종류">
+            <option value="omok">렌주 오목 (2인)</option>
+            <option value="quoridor">쿼리도 (2~4인)</option>
+          </select>
+          <select id="playersSelect" aria-label="인원" class="hidden">
+            <option value="2">2인</option>
+            <option value="3">3인</option>
+            <option value="4">4인</option>
+          </select>
+        </div>
         <div class="row">
           <select id="timeSelect" aria-label="각자 주어지는 총 시간">
             <option value="300">각자 5분</option>
@@ -48,6 +59,16 @@
           <li><b>흑</b>은 정확히 5목만 승리이며, <b>3-3, 4-4, 장목(6목 이상)</b>은 둘 수 없습니다(금수).</li>
           <li>흑이 5목을 만드는 수는 금수가 함께 생겨도 승리입니다.</li>
           <li><b>백</b>은 금수가 없고, 6목 이상도 승리입니다.</li>
+        </ul>
+      </details>
+      <details class="rules">
+        <summary>쿼리도 규칙</summary>
+        <ul>
+          <li>9×9 판에서 자기 말을 반대편 끝 줄에 먼저 도착시키면 승리합니다.</li>
+          <li>차례마다 <b>말을 한 칸 움직이거나</b>, <b>벽(2칸 길이)을 하나 놓습니다</b>.</li>
+          <li>벽은 2인 10개, 3인 7개, 4인 5개씩 가지며, 누군가의 길을 완전히 막을 수는 없습니다.</li>
+          <li>바로 앞에 다른 말이 있으면 뛰어넘을 수 있고, 그 뒤가 막혀 있으면 대각선으로 갑니다.</li>
+          <li>3~4인전에서 기권·퇴장·시간 초과한 사람은 말이 빠지고 나머지끼리 계속합니다.</li>
         </ul>
       </details>
     </div>
@@ -81,17 +102,15 @@
           </div>
         </div>
         <div class="board-tools">
-          <label class="check"><input type="checkbox" id="numToggle" /> 수순 번호</label>
-          <label class="check"><input type="checkbox" id="forbidToggle" checked /> 금수 표시</label>
+          <label class="check omok-only"><input type="checkbox" id="numToggle" /> 수순 번호</label>
+          <label class="check omok-only"><input type="checkbox" id="forbidToggle" checked /> 금수 표시</label>
+          <span class="muted quoridor-only">칸을 누르면 이동, 칸 사이 홈을 누르면 벽 설치</span>
           <label class="check"><input type="checkbox" id="soundToggle" checked /> 소리</label>
         </div>
       </section>
 
       <aside class="side">
-        <div class="players">
-          <div class="player" id="player0"></div>
-          <div class="player" id="player1"></div>
-        </div>
+        <div class="players" id="players"></div>
 
         <div class="actions">
           <button id="undoBtn">무르기</button>
@@ -116,6 +135,9 @@
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/shared/renju.js"></script>
+  <script src="/shared/quoridor.js"></script>
+  <script src="omok-board.js"></script>
+  <script src="quoridor-board.js"></script>
   <script src="client.js"></script>
 </body>
 </html>

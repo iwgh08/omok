@@ -101,6 +101,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 18px; }
 .field span, .lobby-section h2 { font-size: 13px; color: var(--muted); font-weight: 500; margin: 0 0 6px; }
 .lobby-section { margin-bottom: 18px; }
+.game-row { margin-bottom: 8px; }
 #codeInput { text-transform: uppercase; letter-spacing: 2px; }
 .rules { font-size: 13px; color: var(--muted); }
 .rules summary { cursor: pointer; }
@@ -208,6 +209,8 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
   .status-bar.my-turn, .board-stage.my-turn #board, .request-card, .request-icon { animation: none; }
 }
 .board-tools { display: flex; gap: 16px; margin-top: 8px; flex-wrap: wrap; }
+body[data-game="quoridor"] .omok-only,
+body:not([data-game="quoridor"]) .quoridor-only { display: none; }
 .check { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--muted); cursor: pointer; }
 
 .side { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
@@ -230,6 +233,9 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 .player .stone.c0 { border: 2px dashed var(--border); }
 .player .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .player .me { font-size: 12px; color: var(--accent); margin-left: 4px; }
+.player .extra { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.player.out { opacity: 0.5; }
+.player.out .name { text-decoration: line-through; }
 .player .dot { width: 8px; height: 8px; border-radius: 50%; background: #3cb371; }
 .player .dot.off { background: var(--danger); }
 .player .time { font-variant-numeric: tabular-nums; font-weight: 700; min-width: 44px; text-align: right; }
@@ -277,7 +283,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
   .layout { flex-direction: column; }
   .board-wrap { width: 100%; }
   .side { width: 100%; }
-  .players { flex-direction: row; }
-  .player { flex: 1; }
+  .players { flex-direction: row; flex-wrap: wrap; }
+  .player { flex: 1 1 40%; }
   .chat { height: 240px; }
 }
