@@ -29,7 +29,7 @@
 
   let state = null;
   let currentRoom = null;
-  let localDeadline = 0;
+  let stateReceivedAt = 0; // 마지막 state를 받은 시각 (내 차례 시계를 화면에서 줄이는 기준)
   let hover = null;       // 마우스 미리보기 위치
   let touchPick = null;   // 터치: 첫 탭으로 선택한 위치
   let forbiddenCache = { key: '', list: [] };
@@ -66,7 +66,7 @@
   $('createBtn').onclick = () => {
     const name = getName();
     if (!name) return;
-    socket.emit('createRoom', { name, clientId, timeLimit: Number($('timeSelect').value) }, onJoined);
+    socket.emit('createRoom', { name, clientId, totalTime: Number($('timeSelect').value) }, onJoined);
   };
 
   function joinByCode() {
@@ -127,7 +127,7 @@
 
   socket.on('state', (s) => {
     state = s;
-    localDeadline = s.remainingMs != null ? Date.now() + s.remainingMs : 0;
+    stateReceivedAt = Date.now();
     touchPick = null;
     render();
   });
@@ -183,7 +183,7 @@
     if (!state) return;
     const s = state;
     const me = s.you;
-    $('timeLimitLabel').textContent = `한 수 ${s.timeLimit}초`;
+    $('timeLimitLabel').textContent = `각자 ${s.totalTime / 60}분`;
 
     // 상태 문구
     const bar = $('statusBar');
@@ -273,18 +273,32 @@
     }
   }
 
+  // 남은 시간: 서버가 보낸 값에서, 지금 차례인 쪽만 받은 뒤 흐른 시간을 뺌
+  function clockOf(color) {
+    const base = state.clocks[color];
+    const running = state.status === 'playing' && color === state.turn;
+    return Math.max(0, base - (running ? Date.now() - stateReceivedAt : 0));
+  }
+
+  function formatClock(ms) {
+    const sec = Math.ceil(ms / 1000);
+    return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+  }
+
   function updateTimers() {
     if (!state) return;
-    const playing = state.status === 'playing';
-    const remain = Math.max(0, localDeadline - Date.now());
+    const started = state.status !== 'waiting' || state.moves.length > 0;
     document.querySelectorAll('.player .time').forEach((el) => {
-      const active = playing && Number(el.dataset.color) === state.turn;
-      el.textContent = active ? Math.ceil(remain / 1000) : '';
-      el.classList.toggle('low', active && remain <= 5000);
+      const color = Number(el.dataset.color);
+      const ms = color && started ? clockOf(color) : state.totalTime * 1000;
+      el.textContent = formatClock(ms);
+      el.classList.toggle('low', state.status === 'playing' && color === state.turn && ms <= 30000);
     });
     document.querySelectorAll('.player .bar').forEach((el) => {
-      const active = playing && Number(el.dataset.color) === state.turn;
-      el.style.width = active ? `${(remain / (state.timeLimit * 1000)) * 100}%` : '0';
+      const color = Number(el.dataset.color);
+      const ms = color && started ? clockOf(color) : state.totalTime * 1000;
+      el.style.width = `${(ms / (state.totalTime * 1000)) * 100}%`;
+      el.style.opacity = state.status === 'playing' && color === state.turn ? '1' : '0.35';
     });
   }
   setInterval(updateTimers, 100);

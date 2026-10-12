@@ -7,7 +7,7 @@ const Renju = require('./shared/renju');
 const PORT = process.env.PORT || 3000;
 const RECONNECT_GRACE_MS = 30 * 1000;
 const EMPTY_ROOM_TTL_MS = 5 * 60 * 1000;
-const TIME_LIMITS = [15, 30, 60];
+const TOTAL_TIMES = [300, 600, 1200]; // 각자 주어지는 총 시간(초)
 const CENTER = Math.floor(Renju.SIZE / 2);
 const COLOR_NAME = { 1: '흑', 2: '백' };
 const REASON_TEXT = {
@@ -27,10 +27,10 @@ const io = new Server(server);
 
 /**
  * room = {
- *   code, timeLimit, status: 'waiting' | 'playing' | 'ended',
+ *   code, totalTime(초), status: 'waiting' | 'playing' | 'ended',
  *   seats: [seat|null, seat|null], seat = { clientId, name, socketId, connected, graceTimer }
  *   blackSeat: 0|1|null, board, moves: [[x,y]], turn: 1|2, winner: 1|2|0|null, reason,
- *   deadline, turnTimer, undoRequest: 1|2|null, rematch: Set<seatIdx>,
+ *   clocks: { 1: ms, 2: ms }, turnStartedAt, turnTimer, undoRequest: 1|2|null, rematch: Set<seatIdx>,
  *   members: Map<socketId, { clientId, name }>, chat: [], deleteTimer
  * }
  */
@@ -70,14 +70,14 @@ function stateFor(room, socketId) {
   const seatedIds = new Set(room.seats.filter(Boolean).map((s) => s.clientId));
   return {
     code: room.code,
-    timeLimit: room.timeLimit,
+    totalTime: room.totalTime,
     status: room.status,
     board: room.board,
     moves: room.moves,
     turn: room.turn,
     winner: room.winner,
     reason: room.reason,
-    remainingMs: room.status === 'playing' ? Math.max(0, room.deadline - Date.now()) : null,
+    clocks: { 1: remainingOf(room, Renju.BLACK), 2: remainingOf(room, Renju.WHITE) },
     seats: room.seats.map((s, i) => s && { name: s.name, connected: s.connected, color: seatColor(room, i) }),
     spectators: [...room.members.values()].filter((m) => !seatedIds.has(m.clientId)).map((m) => m.name),
     undoRequest: room.undoRequest,
@@ -102,14 +102,31 @@ function system(room, text) {
   addChat(room, { system: true, text });
 }
 
-function startTurnTimer(room) {
+// 체스 시계: 각자 총 시간을 갖고, 자기 차례에만 줄어든다
+function remainingOf(room, color) {
+  let ms = room.clocks[color];
+  if (room.turnStartedAt && color === room.turn) ms -= Date.now() - room.turnStartedAt;
+  return Math.max(0, ms);
+}
+
+function startClock(room) {
   clearTimeout(room.turnTimer);
-  room.deadline = Date.now() + room.timeLimit * 1000;
+  room.turnStartedAt = Date.now();
   room.turnTimer = setTimeout(() => {
     if (room.status !== 'playing') return;
     const loser = room.turn;
+    room.clocks[loser] = 0;
+    room.turnStartedAt = null;
     endGame(room, loser === Renju.BLACK ? Renju.WHITE : Renju.BLACK, 'timeout');
-  }, room.timeLimit * 1000 + 300); // 네트워크 지연 여유
+  }, room.clocks[room.turn] + 300); // 네트워크 지연 여유
+}
+
+// 현재 차례 플레이어가 쓴 시간을 시계에서 빼고 멈춤
+function stopClock(room) {
+  clearTimeout(room.turnTimer);
+  if (!room.turnStartedAt) return;
+  room.clocks[room.turn] = remainingOf(room, room.turn);
+  room.turnStartedAt = null;
 }
 
 function newGame(room) {
@@ -121,14 +138,15 @@ function newGame(room) {
   room.reason = null;
   room.undoRequest = null;
   room.rematch.clear();
-  startTurnTimer(room);
+  room.clocks = { 1: room.totalTime * 1000, 2: room.totalTime * 1000 };
+  startClock(room);
   const black = room.seats[room.blackSeat].name;
   const white = room.seats[1 - room.blackSeat].name;
   system(room, `새 대국 시작! 흑: ${black}, 백: ${white}`);
 }
 
 function endGame(room, winner, reason) {
-  clearTimeout(room.turnTimer);
+  stopClock(room);
   room.status = 'ended';
   room.winner = winner;
   room.reason = reason;
@@ -183,10 +201,10 @@ function scheduleRoomCleanup(room) {
   }, EMPTY_ROOM_TTL_MS);
 }
 
-function createRoom(timeLimit) {
+function createRoom(totalTime) {
   const room = {
     code: makeCode(),
-    timeLimit: TIME_LIMITS.includes(timeLimit) ? timeLimit : 30,
+    totalTime: TOTAL_TIMES.includes(totalTime) ? totalTime : 600,
     status: 'waiting',
     seats: [null, null],
     blackSeat: null,
@@ -195,7 +213,8 @@ function createRoom(timeLimit) {
     turn: Renju.BLACK,
     winner: null,
     reason: null,
-    deadline: 0,
+    clocks: { 1: 0, 2: 0 },
+    turnStartedAt: null,
     turnTimer: null,
     undoRequest: null,
     rematch: new Set(),
@@ -285,9 +304,9 @@ io.on('connection', (socket) => {
     return { ok: true, code: r.code };
   }
 
-  socket.on('createRoom', ({ name, clientId, timeLimit } = {}, cb) => {
+  socket.on('createRoom', ({ name, clientId, totalTime } = {}, cb) => {
     if (typeof cb !== 'function' || !clientId) return;
-    const r = createRoom(Number(timeLimit));
+    const r = createRoom(Number(totalTime));
     cb(join(r.code, cleanName(name), String(clientId)));
   });
 
@@ -313,6 +332,7 @@ io.on('connection', (socket) => {
       if (type) return fail(`${Renju.FORBIDDEN_NAMES[type]} 자리입니다.`);
     }
 
+    stopClock(room);
     room.board[i] = color;
     room.moves.push([x, y]);
     room.undoRequest = null;
@@ -321,7 +341,7 @@ io.on('connection', (socket) => {
     if (Renju.isWin(room.board, x, y, color)) return endGame(room, color, 'five');
     if (room.moves.length === Renju.SIZE * Renju.SIZE) return endGame(room, 0, 'draw');
     room.turn = color === Renju.BLACK ? Renju.WHITE : Renju.BLACK;
-    startTurnTimer(room);
+    startClock(room);
     broadcast(room);
   });
 
@@ -353,8 +373,9 @@ io.on('connection', (socket) => {
       const [x, y] = room.moves.pop();
       room.board[y * Renju.SIZE + x] = Renju.EMPTY;
     }
+    stopClock(room);
     room.turn = requester;
-    startTurnTimer(room);
+    startClock(room);
     system(room, `무르기가 수락되어 ${count}수를 되돌렸습니다`);
     broadcast(room);
   });
