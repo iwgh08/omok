@@ -540,26 +540,26 @@
       noise.buffer = noiseBuffer;
       const band = audioCtx.createBiquadFilter();
       band.type = 'bandpass';
-      band.frequency.value = 2600 * vary;
-      band.Q.value = 1.2;
+      band.frequency.value = 4200 * vary;
+      band.Q.value = 1.8;
       const clickGain = audioCtx.createGain();
-      clickGain.gain.setValueAtTime(0.9, t);
-      clickGain.gain.exponentialRampToValueAtTime(0.001, t + 0.035);
+      clickGain.gain.setValueAtTime(1.0, t);
+      clickGain.gain.exponentialRampToValueAtTime(0.001, t + 0.025);
       noise.connect(band).connect(clickGain).connect(audioCtx.destination);
       noise.start(t);
       noise.stop(t + 0.05);
 
-      // 나무판 울림: 낮은 음을 아주 빠르게 감쇠
+      // 나무판 울림: 높은 음을 작고 아주 짧게 (낮으면 북소리처럼 들림)
       const body = audioCtx.createOscillator();
       body.type = 'sine';
-      body.frequency.setValueAtTime(320 * vary, t);
-      body.frequency.exponentialRampToValueAtTime(140 * vary, t + 0.04);
+      body.frequency.setValueAtTime(1300 * vary, t);
+      body.frequency.exponentialRampToValueAtTime(900 * vary, t + 0.02);
       const bodyGain = audioCtx.createGain();
-      bodyGain.gain.setValueAtTime(0.35, t);
-      bodyGain.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+      bodyGain.gain.setValueAtTime(0.12, t);
+      bodyGain.gain.exponentialRampToValueAtTime(0.001, t + 0.03);
       body.connect(bodyGain).connect(audioCtx.destination);
       body.start(t);
-      body.stop(t + 0.07);
+      body.stop(t + 0.04);
     } catch { /* 소리 미지원 */ }
   }
 
