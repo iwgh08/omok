@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>오목 · 쿼리도</title>
+  <title>오목 · 쿼리도 · 부루마블</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
@@ -12,7 +12,7 @@
   <!-- 로비 -->
   <main id="lobby" class="lobby">
     <div class="lobby-card">
-      <h1><span class="stone-icon black"></span><span class="stone-icon white"></span> 오목 · 쿼리도</h1>
+      <h1><span class="stone-icon black"></span><span class="stone-icon white"></span> 오목 · 쿼리도 · 부루마블</h1>
       <p class="sub">친구와 함께하는 온라인 보드게임</p>
 
       <label class="field">
@@ -26,6 +26,7 @@
           <select id="gameSelect" aria-label="게임 종류">
             <option value="omok">렌주 오목 (2인)</option>
             <option value="quoridor">쿼리도 (2~4인)</option>
+            <option value="marble">부루마블 (2~4인)</option>
           </select>
           <select id="playersSelect" aria-label="인원" class="hidden">
             <option value="2">2인</option>
@@ -38,6 +39,11 @@
             <option value="300">각자 5분</option>
             <option value="600" selected>각자 10분</option>
             <option value="1200">각자 20분</option>
+          </select>
+          <select id="roundsSelect" aria-label="턴 수" class="hidden">
+            <option value="15">15턴</option>
+            <option value="20" selected>20턴</option>
+            <option value="30">30턴</option>
           </select>
           <button id="createBtn" class="primary">방 만들기</button>
         </div>
@@ -71,6 +77,16 @@
           <li>3~4인전에서 기권·퇴장·시간 초과한 사람은 말이 빠지고 나머지끼리 계속합니다.</li>
         </ul>
       </details>
+      <details class="rules">
+        <summary>부루마블 규칙</summary>
+        <ul>
+          <li>주사위 두 개를 굴려 판을 돌며 도시와 관광지를 삽니다. 더블이면 한 번 더 굴리고, 3번 연속이면 무인도로 갑니다.</li>
+          <li>남의 땅에 서면 통행료를 냅니다. 내 도시에 다시 오면 별장·빌딩·호텔을 지어 통행료를 올릴 수 있습니다.</li>
+          <li>출발을 지나면 월급을 받습니다. 황금열쇠, 무인도(3턴 쉼), 우주여행(다음 차례에 원하는 칸으로), 사회복지기금 칸이 있습니다.</li>
+          <li>돈이 모자라면 땅을 골라 팔아 갚고, 땅을 다 팔아도 모자라면 파산(탈락)합니다.</li>
+          <li>한 명만 남거나 정한 턴 수가 끝나면 총자산 1위가 승리합니다. 결정마다 30초가 지나면 자동으로 진행됩니다.</li>
+        </ul>
+      </details>
     </div>
   </main>
 
@@ -90,6 +106,8 @@
         <div id="statusBar" class="status-bar"></div>
         <div id="boardStage" class="board-stage">
           <canvas id="board"></canvas>
+          <!-- 부루마블: 판 가운데의 주사위·행동 버튼·기록 (marble-board.js가 그림) -->
+          <div id="marblePanel" class="marble-panel marble-only"></div>
           <div id="turnBadge" class="turn-badge"></div>
           <!-- 상대의 무르기/재대국 요청 알림 카드 -->
           <div id="requestCard" class="request-card hidden">
@@ -105,6 +123,7 @@
           <label class="check omok-only"><input type="checkbox" id="numToggle" /> 수순 번호</label>
           <label class="check omok-only"><input type="checkbox" id="forbidToggle" checked /> 금수 표시</label>
           <span class="muted quoridor-only">칸을 누르면 이동, 칸 사이 홈을 누르면 벽 설치</span>
+          <span class="muted marble-only">칸을 누르면 땅값·통행료 등 정보를 볼 수 있습니다</span>
           <label class="check"><input type="checkbox" id="soundToggle" checked /> 소리</label>
         </div>
       </section>
@@ -136,8 +155,10 @@
   <script src="/socket.io/socket.io.js"></script>
   <script src="/shared/renju.js"></script>
   <script src="/shared/quoridor.js"></script>
+  <script src="/shared/marble.js"></script>
   <script src="omok-board.js"></script>
   <script src="quoridor-board.js"></script>
+  <script src="marble-board.js"></script>
   <script src="client.js"></script>
 </body>
 </html>

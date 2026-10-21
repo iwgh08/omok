@@ -34,10 +34,15 @@ git log origin/main..HEAD --oneline
 npm.cmd test
 node --check server.js
 node --check public/client.js
+node --check public/omok-board.js
+node --check public/quoridor-board.js
+node --check public/marble-board.js
 node --check shared/renju.js
+node --check shared/quoridor.js
+node --check shared/marble.js
 ```
 
-- `npm.cmd test`는 렌주 판정 테스트와, 실제 서버를 띄워 대국 흐름을 확인하는 서버 테스트를 함께 실행한다.
+- `npm.cmd test`는 렌주·쿼리도·부루마블 규칙 테스트와, 실제 서버를 띄워 대국 흐름을 확인하는 서버 테스트를 함께 실행한다.
 - 하나라도 실패하면 멈추고, 실패한 테스트 이름과 오류 내용을 알려 준다.
 
 ## 4. CLAUDE.md 확인

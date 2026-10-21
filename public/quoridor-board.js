@@ -1,10 +1,7 @@
 // 쿼리도 판 그리기와 입력. client.js가 env({canvas, ctx, $, state, emit, toast})를 넘겨 만든다
-window.QUORIDOR_COLORS = ['#e53935', '#1e88e5', '#43a047', '#f9a825'];
-window.QUORIDOR_COLOR_NAMES = ['빨강', '파랑', '초록', '노랑'];
-
 window.QuoridorBoard = function (env) {
   const { SIZE } = Quoridor;
-  const COLORS = window.QUORIDOR_COLORS;
+  const COLORS = window.SEAT_COLORS;
   const { canvas, ctx } = env;
   let hover = null;      // 마우스 미리보기: {kind:'pawn', x, y} | {kind:'wall', x, y, o}
   let touchPick = null;  // 터치: 첫 탭으로 선택한 대상

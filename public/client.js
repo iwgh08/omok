@@ -1,8 +1,9 @@
 (() => {
   const { BLACK } = Renju;
   const COLOR_NAME = { 1: '흑', 2: '백' };
-  const Q_COLORS = window.QUORIDOR_COLORS;
-  const Q_NAMES = window.QUORIDOR_COLOR_NAMES;
+  // 쿼리도·부루마블의 자리별 말 색 (판 모듈도 함께 씀)
+  const SEAT_COLORS = (window.SEAT_COLORS = ['#e53935', '#1e88e5', '#43a047', '#f9a825']);
+  const SEAT_NAMES = (window.SEAT_COLOR_NAMES = ['빨강', '파랑', '초록', '노랑']);
   const REASON_TEXT = {
     five: '5목 완성',
     goal: '목표 도달',
@@ -11,6 +12,15 @@
     disconnect: '연결 끊김',
     leave: '대국 중 퇴장',
     draw: '판이 가득 참',
+    bankrupt: '파산',
+    rounds: '턴 종료 · 총자산 1위',
+  };
+  const MARBLE_PHASE = {
+    roll: '주사위를 굴리세요',
+    buy: '땅을 살지 고르세요',
+    build: '건물을 지을지 고르세요',
+    sell: '돈이 모자랍니다 · 팔 땅을 고르세요',
+    travel: '우주여행 · 갈 칸을 고르세요',
   };
 
   const $ = (id) => document.getElementById(id);
@@ -43,11 +53,20 @@
 
   const gameSelect = $('gameSelect');
   const playersSelect = $('playersSelect');
-  gameSelect.value = load('omok.game') === 'quoridor' ? 'quoridor' : 'omok';
+  const roundsSelect = $('roundsSelect');
+  gameSelect.value = ['quoridor', 'marble'].includes(load('omok.game')) ? load('omok.game') : 'omok';
   playersSelect.value = ['2', '3', '4'].includes(load('omok.players')) ? load('omok.players') : '2';
-  const syncGameSelect = () => playersSelect.classList.toggle('hidden', gameSelect.value !== 'quoridor');
+  roundsSelect.value = ['15', '20', '30'].includes(load('omok.rounds')) ? load('omok.rounds') : '20';
+  // 인원은 쿼리도·부루마블만, 부루마블은 총 시간 대신 턴 수를 고른다
+  const syncGameSelect = () => {
+    const game = gameSelect.value;
+    playersSelect.classList.toggle('hidden', game === 'omok');
+    $('timeSelect').classList.toggle('hidden', game === 'marble');
+    roundsSelect.classList.toggle('hidden', game !== 'marble');
+  };
   gameSelect.onchange = () => { save('omok.game', gameSelect.value); syncGameSelect(); };
   playersSelect.onchange = () => save('omok.players', playersSelect.value);
+  roundsSelect.onchange = () => save('omok.rounds', roundsSelect.value);
   syncGameSelect();
 
   function getName() {
@@ -79,6 +98,7 @@
       totalTime: Number($('timeSelect').value),
       game: gameSelect.value,
       players: Number(playersSelect.value),
+      rounds: Number(roundsSelect.value),
     }, onJoined);
   };
 
@@ -106,7 +126,7 @@
 
   $('leaveBtn').onclick = () => {
     if (state && amPlaying() &&
-        !confirm(`대국 중에 나가면 ${isQ() ? '탈락' : '패배'} 처리됩니다. 나가시겠습니까?`)) return;
+        !confirm(`대국 중에 나가면 ${seatGame() ? '탈락' : '패배'} 처리됩니다. 나가시겠습니까?`)) return;
     socket.emit('leaveRoom');
     backToLobby();
   };
@@ -164,10 +184,10 @@
     } else {
       const b = document.createElement('b');
       if (msg.seat !== undefined) {
-        // 쿼리도: 말 색 점
+        // 쿼리도·부루마블: 말 색 점
         const dot = document.createElement('span');
         dot.textContent = msg.seat >= 0 ? '● ' : '👀 ';
-        if (msg.seat >= 0) dot.style.color = Q_COLORS[msg.seat];
+        if (msg.seat >= 0) dot.style.color = SEAT_COLORS[msg.seat];
         b.append(dot, msg.name);
       } else {
         b.textContent = (msg.color ? (msg.color === BLACK ? '● ' : '○ ') : '👀 ') + msg.name;
@@ -205,22 +225,26 @@
   $('soundToggle').onchange = () => save('omok.sound', $('soundToggle').checked ? 'on' : 'off');
 
   // ---------- 게임별 공통 판단 ----------
-  // 오목은 색(1|2)으로, 쿼리도는 자리 번호로 차례·시계·승자를 구분한다
+  // 오목은 색(1|2)으로, 쿼리도·부루마블은 자리 번호로 차례·시계·승자를 구분한다
   const isQ = () => state.game === 'quoridor';
-  const myKey = () => (isQ() ? state.you.seat : state.you.color);
-  // 지금 대국에 참여 중인지 (쿼리도는 탈락하지 않았는지)
+  const isM = () => state.game === 'marble';
+  const seatGame = () => state.game !== 'omok';
+  const myKey = () => (seatGame() ? state.you.seat : state.you.color);
+  // 쿼리도·부루마블에서 p번 자리가 탈락했는지
+  const isOut = (s, p) => (s.game === 'quoridor' ? !s.q.pawns[p] : s.m.players[p].out);
+  // 지금 대국에 참여 중인지 (쿼리도·부루마블은 탈락하지 않았는지)
   function amPlaying() {
     const s = state;
     if (s.status !== 'playing' || s.you.seat < 0) return false;
-    return isQ() ? !!s.q.pawns[s.you.seat] : !!s.you.color;
+    return s.game === 'omok' ? !!s.you.color : !isOut(s, s.you.seat);
   }
-  const moveCount = (s) => (s.game === 'quoridor' ? s.moveCount : s.moves.length);
+  const moveCount = (s) => ({ quoridor: s.moveCount, marble: s.m?.seq, omok: s.moves?.length }[s.game]);
 
   function playerName(color) {
     const seat = state.seats.find((s) => s && s.color === color);
     return seat ? seat.name : COLOR_NAME[color];
   }
-  const qName = (p) => state.names[p] || state.seats[p]?.name || Q_NAMES[p];
+  const seatName = (p) => state.names[p] || state.seats[p]?.name || SEAT_NAMES[p];
 
   // ---------- 화면 갱신 ----------
   function omokStatus(s) {
@@ -248,24 +272,31 @@
     return { text, myTurn };
   }
 
-  function quoridorStatus(s) {
+  // 쿼리도·부루마블 상태 문구 (대국 중 문구만 게임마다 다름)
+  function seatStatus(s) {
     const seat = s.you.seat;
     let text = '';
     let myTurn = false;
     if (s.status === 'waiting') {
       const filled = s.seats.filter(Boolean).length;
       text = `참가자를 기다리는 중… (${filled}/${s.players}명) "초대 링크 복사"로 친구를 불러 주세요`;
-      if (s.winner !== null) text = `지난 대국 ${qName(s.winner)} 승리 · ${text}`;
+      if (s.winner !== null) text = `지난 대국 ${seatName(s.winner)} 승리 · ${text}`;
     } else if (s.status === 'playing') {
-      const alive = seat >= 0 && !!s.q.pawns[seat];
+      const alive = seat >= 0 && !isOut(s, seat);
       myTurn = alive && s.turn === seat;
-      text = myTurn ? `내 차례입니다 (${Q_NAMES[seat]}) · 말을 움직이거나 벽을 놓으세요`
-        : `${qName(s.turn)} (${Q_NAMES[s.turn]}) 차례`;
+      if (isM()) {
+        const round = `${s.m.round}/${s.m.maxRounds}턴`;
+        text = myTurn ? `내 차례입니다 · ${MARBLE_PHASE[s.m.phase]} · ${round}`
+          : `${seatName(s.turn)} (${SEAT_NAMES[s.turn]}) 차례 · ${round}`;
+      } else {
+        text = myTurn ? `내 차례입니다 (${SEAT_NAMES[seat]}) · 말을 움직이거나 벽을 놓으세요`
+          : `${seatName(s.turn)} (${SEAT_NAMES[s.turn]}) 차례`;
+      }
       if (seat < 0) text = '관전 중 · ' + text;
       else if (!alive) text = '탈락 · ' + text;
     } else if (s.status === 'ended') {
-      const who = seat >= 0 ? (s.winner === seat ? '승리했습니다!' : `패배했습니다 · ${qName(s.winner)} 승리`)
-        : `${qName(s.winner)} (${Q_NAMES[s.winner]}) 승리`;
+      const who = seat >= 0 ? (s.winner === seat ? '승리했습니다!' : `패배했습니다 · ${seatName(s.winner)} 승리`)
+        : `${seatName(s.winner)} (${SEAT_NAMES[s.winner]}) 승리`;
       text = `${who} — ${REASON_TEXT[s.reason]}`;
       if (seat >= 0 && s.rematch.length && !s.rematch.includes(seat)) text += ` · 재대국 요청 ${s.rematch.length}/${s.players}`;
     }
@@ -277,11 +308,13 @@
     const s = state;
     const me = s.you;
     document.body.dataset.game = s.game;
-    $('timeLimitLabel').textContent = `${isQ() ? `쿼리도 ${s.players}인 · ` : ''}각자 ${s.totalTime / 60}분`;
+    $('timeLimitLabel').textContent = isM()
+      ? `부루마블 ${s.players}인 · 차례당 ${s.totalTime}초 · ${s.rounds}턴`
+      : `${isQ() ? `쿼리도 ${s.players}인 · ` : ''}각자 ${s.totalTime / 60}분`;
 
     // 상태 문구
     const bar = $('statusBar');
-    const { text, myTurn } = isQ() ? quoridorStatus(s) : omokStatus(s);
+    const { text, myTurn } = seatGame() ? seatStatus(s) : omokStatus(s);
     bar.textContent = myTurn ? `● ${text}` : text;
     bar.classList.toggle('my-turn', myTurn);
     $('boardStage').classList.toggle('my-turn', myTurn);
@@ -294,7 +327,7 @@
       requestMode = 'undo';
       if (isQ()) {
         const need = s.q.pawns.filter(Boolean).length - 1;
-        $('requestText').textContent = `${qName(s.undoRequest)} 님이 무르기를 요청했습니다 (수락 ${s.undoAccepts.length}/${need})`;
+        $('requestText').textContent = `${seatName(s.undoRequest)} 님이 무르기를 요청했습니다 (수락 ${s.undoAccepts.length}/${need})`;
       } else {
         $('requestText').textContent = `${playerName(s.undoRequest)} 님이 무르기를 요청했습니다`;
       }
@@ -304,7 +337,7 @@
                !rematchDismissed) {
       requestMode = 'rematch';
       const names = s.rematch.map((i) => s.seats[i]?.name).filter(Boolean).join(', ');
-      $('requestText').textContent = isQ()
+      $('requestText').textContent = seatGame()
         ? `${names} 님이 재대국을 원합니다 (${s.rematch.length}/${s.players}, 차례 순서 교대)`
         : `${names} 님이 재대국을 원합니다 (흑백 교대)`;
       $('requestYes').textContent = '재대국 하기';
@@ -322,11 +355,11 @@
     $('resignBtn').disabled = !playing;
     const canRematch = s.status === 'ended' && me.seat >= 0;
     $('rematchBtn').classList.toggle('hidden', !canRematch);
-    $('undoBtn').classList.toggle('hidden', canRematch);
+    $('undoBtn').classList.toggle('hidden', canRematch || isM()); // 부루마블은 무르기 없음
     $('resignBtn').classList.toggle('hidden', canRematch);
     const waitingRematch = s.rematch.includes(me.seat);
     $('rematchBtn').disabled = waitingRematch;
-    if (isQ()) {
+    if (seatGame()) {
       $('rematchBtn').textContent = waitingRematch ? `다른 사람 대기 중… (${s.rematch.length}/${s.players})` : '재대국 (순서 교대)';
     } else {
       $('rematchBtn').textContent = waitingRematch ? '상대 대기 중…' : '재대국 (흑백 교대)';
@@ -338,24 +371,37 @@
     drawBoard();
   }
 
-  // 플레이어 카드: 오목은 흑이 위, 쿼리도는 차례 순서대로
+  // 플레이어 카드: 오목은 흑이 위, 쿼리도·부루마블은 차례 순서대로
   function renderPlayers() {
     const s = state;
     const cards = [];
-    if (isQ()) {
-      for (const p of Quoridor.turnOrder(s.players)) {
+    if (seatGame()) {
+      const order = isQ() ? Quoridor.turnOrder(s.players) : Marble.turnOrder(s.players);
+      for (const p of order) {
         const seat = s.seats[p];
         const started = s.status !== 'waiting';
-        cards.push({
-          name: seat ? seat.name : started ? qName(p) : null,
+        const card = {
+          name: seat ? seat.name : started ? seatName(p) : null,
           isMe: p === s.you.seat,
           connected: seat ? seat.connected : null,
           active: s.status === 'playing' && s.turn === p,
-          out: started && !s.q.pawns[p],
-          stoneColor: Q_COLORS[p],
+          out: started && isOut(s, p),
+          stoneColor: SEAT_COLORS[p],
           clockKey: seat || started ? p : null,
-          extra: `벽 ${started ? s.q.wallsLeft[p] : Quoridor.WALLS[s.players]}`,
-        });
+        };
+        if (isQ()) {
+          card.extra = `벽 ${started ? s.q.wallsLeft[p] : Quoridor.WALLS[s.players]}`;
+        } else {
+          // 부루마블: 현금 표시, 시계는 지금 결정하는 사람만
+          const pl = s.m.players[p];
+          card.extra = Marble.money(started ? pl.cash : Marble.START_CASH);
+          card.clockKey = card.active ? p : null;
+          if (started && !pl.out) {
+            card.title = `총자산 ${Marble.money(Marble.assets(s.m, p))}`;
+            if (pl.island) card.tag = '무인도';
+          }
+        }
+        cards.push(card);
       }
     } else {
       const order = [0, 1];
@@ -380,6 +426,7 @@
 
   function renderPlayer(el, c) {
     el.innerHTML = '';
+    el.title = c.title || '';
     el.classList.toggle('active', c.active);
     el.classList.toggle('out', !!c.out);
     const stone = document.createElement('span');
@@ -392,6 +439,7 @@
       const tags = [];
       if (c.isMe) tags.push('(나)');
       if (c.out) tags.push('탈락');
+      if (c.tag) tags.push(c.tag);
       if (tags.length) {
         const tag = document.createElement('span');
         tag.className = 'me';
@@ -447,7 +495,8 @@
       const key = Number(el.dataset.key);
       const ms = started ? clockOf(key) : total;
       el.textContent = formatClock(ms);
-      el.classList.toggle('low', state.status === 'playing' && key === state.turn && ms <= 30000);
+      // 부루마블(결정당 30초)에서 처음부터 빨갛게 보이지 않도록 기준을 전체의 1/3 이하로
+      el.classList.toggle('low', state.status === 'playing' && key === state.turn && ms <= Math.min(30000, total / 3));
     });
     document.querySelectorAll('.player .bar').forEach((el) => {
       const key = Number(el.dataset.key);
@@ -466,7 +515,7 @@
     get state() { return state; },
     emit: (ev, data) => socket.emit(ev, data),
   };
-  const boards = { omok: OmokBoard(env), quoridor: QuoridorBoard(env) };
+  const boards = { omok: OmokBoard(env), quoridor: QuoridorBoard(env), marble: MarbleBoard(env) };
   const board = () => boards[state ? state.game : 'omok'];
   function drawBoard() { board().draw(); }
 
@@ -510,28 +559,34 @@
     const me = s.you;
     if (me.seat < 0) return; // 관전자는 표시 없음
     const q = s.game === 'quoridor';
-    const key = q ? me.seat : me.color;
+    const bySeat = s.game !== 'omok';
+    const key = bySeat ? me.seat : me.color;
     const wasPlaying = prev && prev.code === s.code && prev.status === 'playing';
 
     // 새 대국 시작
     if (s.status === 'playing' && !wasPlaying) {
       rematchDismissed = false;
-      showBadge(`대국 시작! 나는 ${q ? Q_NAMES[me.seat] : COLOR_NAME[me.color]}`, 1600);
+      showBadge(`대국 시작! 나는 ${bySeat ? SEAT_NAMES[me.seat] : COLOR_NAME[me.color]}`, 1600);
       return;
     }
 
     // 대국 종료
     if (s.status === 'ended' && wasPlaying) {
-      showBadge(!q && !s.winner ? '무승부' : s.winner === key ? '승리! 🎉' : '패배', 1800);
+      showBadge(!bySeat && !s.winner ? '무승부' : s.winner === key ? '승리! 🎉' : '패배', 1800);
     }
 
     if (s.status === 'playing' && wasPlaying) {
-      const alive = !q || !!s.q.pawns[me.seat];
+      const alive = !bySeat || !isOut(s, me.seat);
       // 탈락
-      if (q && !alive && prev.q.pawns[me.seat]) showBadge('탈락', 1600);
-      // 내 차례가 됨
+      if (bySeat && !alive && !isOut(prev, me.seat)) showBadge('탈락', 1600);
       const moved = prev.turn !== s.turn || moveCount(prev) !== moveCount(s);
-      if (alive && key === s.turn && moved) showBadge('내 차례!');
+      if (s.game === 'marble') {
+        // 내가 굴릴 차례가 새로 됨 (더블로 한 번 더 굴릴 때 포함)
+        const rolling = s.m.phase === 'roll' || s.m.phase === 'travel';
+        if (alive && key === s.turn && rolling && moved) showBadge(prev.turn === key ? '한 번 더!' : '내 차례!');
+      } else if (alive && key === s.turn && moved) {
+        showBadge('내 차례!');
+      }
       // 내 무르기 요청의 결과 (누가 탈락해서 취소된 경우는 제외)
       const outChanged = q && s.q.pawns.filter(Boolean).length !== prev.q.pawns.filter(Boolean).length;
       if (prev.undoRequest === key && s.undoRequest === null && !outChanged) {

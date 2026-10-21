@@ -10,27 +10,34 @@ const URL = `http://localhost:${PORT}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let server;
+const servers = [];
 const sockets = [];
 
-test.before(async () => {
-  server = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
-    env: { ...process.env, PORT: String(PORT) },
+async function startServer(port, env = {}) {
+  const proc = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+    env: { ...process.env, PORT: String(port), ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  servers.push(proc);
   await new Promise((resolve, reject) => {
-    server.stdout.on('data', (d) => String(d).includes('실행 중') && resolve());
-    server.on('exit', (code) => reject(new Error(`서버가 종료됨 (code ${code})`)));
+    proc.stdout.on('data', (d) => String(d).includes('실행 중') && resolve());
+    proc.on('exit', (code) => reject(new Error(`서버가 종료됨 (code ${code})`)));
     setTimeout(() => reject(new Error('서버 시작 시간 초과')), 5000);
   });
+  return proc;
+}
+
+test.before(async () => {
+  server = await startServer(PORT);
 });
 
 test.after(() => {
   sockets.forEach((s) => s.disconnect());
-  server.kill();
+  servers.forEach((s) => s.kill());
 });
 
-function client(name, clientId) {
-  const s = io(URL, { forceNew: true });
+function client(name, clientId, url = URL) {
+  const s = io(url, { forceNew: true });
   sockets.push(s);
   const c = { s, name, clientId, state: null, errors: [], chat: [] };
   s.on('state', (st) => (c.state = st));
@@ -108,7 +115,8 @@ test('대국 전체 흐름', async (t) => {
   });
 
   await t.test('체스 시계', async () => {
-    assert.deepStrictEqual(A.state.clocks, { 1: 300000, 2: 300000 }, '새 대국은 시계 초기화');
+    // 흑 시계는 startClock과 broadcast 사이에 몇 ms가 흐를 수 있음
+    assert.ok(A.state.clocks[1] > 299900 && A.state.clocks[2] === 300000, '새 대국은 시계 초기화');
     await sleep(1000);
     await place(black, 7, 7);
     const b1 = A.state.clocks[1];
@@ -117,7 +125,8 @@ test('대국 전체 흐름', async (t) => {
     assert.ok(A.state.clocks[2] > 299900, `백 시계는 거의 그대로 (${A.state.clocks[2]})`);
     await sleep(700);
     await place(white, 0, 0);
-    assert.strictEqual(A.state.clocks[1], b1, '상대 차례엔 내 시계 정지');
+    // 백이 두자마자 흑 시계가 다시 돌기 시작하므로 몇 ms 차이는 허용
+    assert.ok(b1 - A.state.clocks[1] < 50, `상대 차례엔 내 시계 정지 (${b1} → ${A.state.clocks[1]})`);
     assert.ok(A.state.clocks[2] < 299500);
   });
 
@@ -226,4 +235,78 @@ test('쿼리도 3인 흐름', async (t) => {
     assert.strictEqual(S.state.q.pawns[seat], null);
     assert.strictEqual(S.state.seats[seat], null);
   });
+});
+
+test('부루마블 2인 흐름', async (t) => {
+  const P = [client('갑', 'm-a'), client('을', 'm-b')];
+  const S = client('구경', 'm-c');
+  await sleep(200);
+
+  const res = await emit(P[0], 'createRoom', { name: '갑', clientId: 'm-a', game: 'marble', players: 2, rounds: 15 });
+  assert.ok(res.ok && res.game === 'marble');
+  await emit(P[1], 'joinRoom', { code: res.code, name: '을', clientId: 'm-b' });
+  await emit(S, 'joinRoom', { code: res.code, name: '구경', clientId: 'm-c' });
+  await sleep(200);
+
+  const st = () => P[0].state;
+  const bySeat = () => { const m = []; P.forEach((c) => (m[c.state.you.seat] = c)); return m; };
+  const act = async (c, data) => { c.s.emit('act', data); await sleep(80); };
+
+  await t.test('2명이 차면 시작, 카드 순서는 숨김', () => {
+    assert.strictEqual(st().status, 'playing');
+    assert.strictEqual(st().rounds, 15);
+    assert.strictEqual(st().totalTime, 30, '결정 1번당 30초');
+    assert.strictEqual(st().m.deck, undefined);
+    assert.strictEqual(st().turn, st().m.turn);
+    assert.strictEqual(S.state.you.seat, -1);
+  });
+
+  await t.test('차례·관전자·무르기 검증', async () => {
+    const other = bySeat()[1 - st().turn];
+    await act(other, { type: 'roll' });
+    assert.ok(other.errors.includes('내 차례가 아닙니다.'));
+    await act(S, { type: 'roll' });
+    assert.ok(S.errors.some((e) => e.includes('관전자')));
+    other.s.emit('undoRequest'); await sleep(80);
+    assert.ok(other.errors.some((e) => e.includes('무르기')));
+    for (const ev of ['act', 'undoReply']) S.s.emit(ev, null);
+    const cur = bySeat()[st().turn];
+    for (const type of ['__proto__', 'constructor', 'toString']) cur.s.emit('act', { type });
+    cur.s.emit('act', { type: 'build', villa: { a: 1 } });
+    await sleep(100);
+    assert.strictEqual(server.exitCode, null, '이상한 행동을 보내도 서버가 살아 있음');
+  });
+
+  await t.test('주사위를 굴리면 진행', async () => {
+    const seq = st().m.seq;
+    await act(bySeat()[st().turn], { type: 'roll' });
+    assert.ok(st().m.seq > seq);
+    assert.strictEqual(st().m.dice.length, 2);
+  });
+
+  await t.test('기권하면 상대 승리', async () => {
+    const loser = bySeat()[st().turn].state.you.seat;
+    bySeat()[loser].s.emit('resign'); await sleep(100);
+    assert.strictEqual(st().status, 'ended');
+    assert.strictEqual(st().winner, 1 - loser);
+    assert.strictEqual(st().reason, 'resign');
+  });
+});
+
+test('부루마블 시간 초과는 자동 진행', async () => {
+  const port = PORT + 100;
+  await startServer(port, { MARBLE_TURN_SEC: '0.4' });
+  const url = `http://localhost:${port}`;
+  const A = client('갑', 't-a', url);
+  const B = client('을', 't-b', url);
+  await sleep(200);
+  const res = await emit(A, 'createRoom', { name: '갑', clientId: 't-a', game: 'marble', players: 2 });
+  await emit(B, 'joinRoom', { code: res.code, name: '을', clientId: 't-b' });
+  await sleep(150);
+  assert.strictEqual(A.state.status, 'playing');
+  const seq = A.state.m.seq;
+  await sleep(1500);
+  assert.ok(A.state.m.seq > seq, '가만히 있어도 진행됨');
+  assert.ok(A.state.m.log.some((l) => l.includes('자동 진행')));
+  assert.ok(A.state.m.players.every((p) => !p.out), '시간 초과로는 탈락하지 않음');
 });

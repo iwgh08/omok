@@ -4,11 +4,14 @@ const express = require('express');
 const { Server } = require('socket.io');
 const Renju = require('./shared/renju');
 const Quoridor = require('./shared/quoridor');
+const Marble = require('./shared/marble');
 
 const PORT = process.env.PORT || 3000;
 const RECONNECT_GRACE_MS = 30 * 1000;
 const EMPTY_ROOM_TTL_MS = 5 * 60 * 1000;
 const TOTAL_TIMES = [300, 600, 1200]; // 각자 주어지는 총 시간(초)
+const MARBLE_TURN_SEC = Number(process.env.MARBLE_TURN_SEC) || 30; // 부루마블 결정 1번당 시간(초)
+const MARBLE_ROUNDS = [15, 20, 30];
 const CENTER = Math.floor(Renju.SIZE / 2);
 const COLOR_NAME = { 1: '흑', 2: '백' };
 const REASON_TEXT = {
@@ -19,6 +22,8 @@ const REASON_TEXT = {
   disconnect: '연결 끊김',
   leave: '대국 중 퇴장',
   draw: '판이 가득 참',
+  bankrupt: '파산',
+  rounds: '턴 종료 · 총자산 1위',
 };
 
 const app = express();
@@ -38,8 +43,10 @@ const io = new Server(server);
  *   쿼리도: q(Quoridor 게임), names: [이름](대국 시작 때 스냅샷), firstSeat, turn: 자리 번호,
  *         winner: 자리 번호|null, clocks: [ms], history: [{q, turn}](무르기용),
  *         undoRequest: 자리 번호|null, undoAccepts: Set<자리 번호>
+ *   부루마블: m(Marble 게임, 차례 진행도 m이 맡음), names, firstSeat, rounds(턴 수 제한),
+ *         turn: m.turn을 따라감, winner: 자리 번호|null, clocks: [ms](결정할 때마다 totalTime초로 다시 채움)
  * }
- * 시계(clocks)와 turn은 오목에서는 색, 쿼리도에서는 자리 번호를 키로 쓴다.
+ * 시계(clocks)와 turn은 오목에서는 색, 쿼리도·부루마블에서는 자리 번호를 키로 쓴다.
  */
 const rooms = new Map();
 
@@ -71,17 +78,29 @@ function seatIndexOf(room, clientId) {
   return room.seats.findIndex((s) => s && s.clientId === clientId);
 }
 
-// 쿼리도: 아직 판에 말이 남아 있는 자리들 (차례 순서대로)
+// 쿼리도·부루마블은 자리 번호로 차례·시계·승자를 구분한다
+const seatGame = (room) => room.game !== 'omok';
+
+function seatOrder(room) {
+  const n = room.seats.length;
+  return room.game === 'quoridor' ? Quoridor.turnOrder(n) : Marble.turnOrder(n);
+}
+
+function isAlive(room, p) {
+  return room.game === 'quoridor' ? !!room.q.pawns[p] : !room.m.players[p].out;
+}
+
+// 아직 탈락하지 않은 자리들 (차례 순서대로)
 function aliveSeats(room) {
-  return Quoridor.turnOrder(room.seats.length).filter((p) => room.q.pawns[p]);
+  return seatOrder(room).filter((p) => isAlive(room, p));
 }
 
 function nextAlive(room, from) {
-  const order = Quoridor.turnOrder(room.seats.length);
+  const order = seatOrder(room);
   const start = order.indexOf(from);
   for (let k = 1; k <= order.length; k++) {
     const p = order[(start + k) % order.length];
-    if (room.q.pawns[p]) return p;
+    if (isAlive(room, p)) return p;
   }
   return from;
 }
@@ -103,17 +122,16 @@ function stateFor(room, socketId) {
     undoRequest: room.undoRequest,
     rematch: [...room.rematch],
   };
-  if (room.game === 'quoridor') {
-    return {
+  if (seatGame(room)) {
+    const bySeat = {
       ...common,
-      q: room.q,
       names: room.names,
-      moveCount: room.history.length,
       clocks: room.clocks.map((_, i) => remainingOf(room, i)),
       seats: room.seats.map((s) => s && { name: s.name, connected: s.connected }),
-      undoAccepts: [...room.undoAccepts],
       you: { seat: mySeat },
     };
+    if (room.game === 'marble') return { ...bySeat, rounds: room.rounds, m: Marble.publicView(room.m) };
+    return { ...bySeat, q: room.q, moveCount: room.history.length, undoAccepts: [...room.undoAccepts] };
   }
   return {
     ...common,
@@ -141,18 +159,21 @@ function system(room, text) {
   addChat(room, { system: true, text });
 }
 
-// 체스 시계: 각자 총 시간을 갖고, 자기 차례에만 줄어든다 (key: 오목은 색, 쿼리도는 자리 번호)
+// 체스 시계: 각자 총 시간을 갖고, 자기 차례에만 줄어든다 (key: 오목은 색, 쿼리도·부루마블은 자리 번호)
 function remainingOf(room, key) {
   let ms = room.clocks[key];
   if (room.turnStartedAt && key === room.turn) ms -= Date.now() - room.turnStartedAt;
   return Math.max(0, ms);
 }
 
+// 부루마블은 체스 시계가 아니라 결정할 때마다 totalTime초를 새로 주고, 넘기면 자동으로 진행한다
 function startClock(room) {
   clearTimeout(room.turnTimer);
+  if (room.game === 'marble') room.clocks[room.turn] = room.totalTime * 1000;
   room.turnStartedAt = Date.now();
   room.turnTimer = setTimeout(() => {
     if (room.status !== 'playing') return;
+    if (room.game === 'marble') return applyAct(room, room.turn, Marble.autoAction(room.m), true);
     const loser = room.turn;
     room.clocks[loser] = 0;
     room.turnStartedAt = null;
@@ -175,16 +196,20 @@ function newGame(room) {
   room.reason = null;
   room.undoRequest = null;
   room.rematch.clear();
-  if (room.game === 'quoridor') {
+  if (seatGame(room)) {
     const n = room.seats.length;
-    room.q = Quoridor.createGame(n);
     room.names = room.seats.map((s) => s.name);
-    room.history = [];
-    room.undoAccepts.clear();
+    if (room.game === 'quoridor') {
+      room.q = Quoridor.createGame(n);
+      room.history = [];
+      room.undoAccepts.clear();
+    } else {
+      room.m = Marble.createGame(n, { first: room.firstSeat, maxRounds: room.rounds, names: room.names });
+    }
     room.turn = room.firstSeat;
     room.clocks = Array(n).fill(room.totalTime * 1000);
     startClock(room);
-    const order = Quoridor.turnOrder(n);
+    const order = seatOrder(room);
     const from = order.indexOf(room.firstSeat);
     const names = order.map((_, k) => room.names[order[(from + k) % n]]);
     system(room, `새 대국 시작! 순서: ${names.join(' → ')}`);
@@ -207,8 +232,8 @@ function endGame(room, winner, reason) {
   room.reason = reason;
   room.undoRequest = null;
   room.rematch.clear();
-  if (room.game === 'quoridor') {
-    room.undoAccepts.clear();
+  if (seatGame(room)) {
+    if (room.game === 'quoridor') room.undoAccepts.clear();
     system(room, `${room.names[winner]} 승리 — ${REASON_TEXT[reason]}`);
   } else if (winner) {
     const name = room.seats[seatOfColor(room, winner)]?.name ?? COLOR_NAME[winner];
@@ -217,7 +242,7 @@ function endGame(room, winner, reason) {
     system(room, `무승부 — ${REASON_TEXT[reason]}`);
   }
   broadcast(room);
-  // 쿼리도에서 대국 중에 나간 사람이 있으면 빈 자리를 채우고 다음 대국을 기다린다
+  // 쿼리도·부루마블에서 대국 중에 나간 사람이 있으면 빈 자리를 채우고 다음 대국을 기다린다
   if (!room.seats.every(Boolean)) {
     room.status = 'waiting';
     fillSeats(room);
@@ -226,14 +251,20 @@ function endGame(room, winner, reason) {
 }
 
 // 대국자가 기권·퇴장·시간 초과·연결 끊김으로 빠질 때
-// 오목은 상대가 이기고, 쿼리도는 그 말만 빼고 계속한다 (한 명만 남으면 그 사람이 승리)
+// 오목은 상대가 이기고, 쿼리도·부루마블은 그 사람만 빼고 계속한다 (한 명만 남으면 그 사람이 승리)
 function forfeit(room, idx, reason) {
   if (room.status !== 'playing' || idx < 0) return;
-  if (room.game !== 'quoridor') {
+  if (room.game === 'omok') {
     endGame(room, seatColor(room, idx) === Renju.BLACK ? Renju.WHITE : Renju.BLACK, reason);
     return;
   }
-  if (!room.q.pawns[idx]) return;
+  if (!isAlive(room, idx)) return;
+  if (room.game === 'marble') {
+    stopClock(room);
+    Marble.eliminate(room.m, idx); // 땅은 은행으로 돌아감
+    if (!room.m.over) system(room, `${room.names[idx]} 님이 탈락했습니다 — ${REASON_TEXT[reason]}`);
+    return afterMarble(room, reason);
+  }
   stopClock(room);
   room.q.pawns[idx] = null;
   room.history = []; // 탈락 이전으로는 무를 수 없음
@@ -243,6 +274,29 @@ function forfeit(room, idx, reason) {
   if (alive.length === 1) return endGame(room, alive[0], reason);
   system(room, `${room.names[idx]} 님이 탈락했습니다 — ${REASON_TEXT[reason]}`);
   if (room.turn === idx) room.turn = nextAlive(room, idx);
+  startClock(room);
+  broadcast(room);
+}
+
+// 부루마블 행동 하나를 반영한다 (auto: 시간 초과로 대신 하는 행동). 잘못된 행동이면 오류 문구를 돌려줌
+function applyAct(room, idx, action, auto) {
+  const g = room.m;
+  const wasOut = g.players.map((p) => p.out);
+  if (auto) Marble.note(g, `${room.names[idx]}: 시간 초과 — 자동 진행`);
+  const res = Marble.act(g, idx, action);
+  if (res.error) return res.error; // act는 오류일 때 상태를 바꾸지 않으므로 시계도 그대로 둔다
+  stopClock(room);
+  if (action.type === 'roll') io.to(room.code).emit('stonePlaced');
+  g.players.forEach((p, i) => p.out && !wasOut[i] && system(room, `${room.names[i]} 님이 파산했습니다`));
+  afterMarble(room);
+  return null;
+}
+
+// 부루마블 상태가 바뀐 뒤: 끝났으면 종료하고, 아니면 다음 결정의 시계를 켠다
+function afterMarble(room, reason) {
+  const g = room.m;
+  if (g.over) return endGame(room, g.over.winner, reason || g.over.reason);
+  room.turn = g.turn;
   startClock(room);
   broadcast(room);
 }
@@ -266,11 +320,11 @@ function fillSeats(room) {
   }
 }
 
-// 선수 교대: 오목은 흑백을 바꾸고, 쿼리도는 첫 차례를 다음 자리로 넘긴다 (첫 판은 무작위)
+// 선수 교대: 오목은 흑백을 바꾸고, 쿼리도·부루마블은 첫 차례를 다음 자리로 넘긴다 (첫 판은 무작위)
 function rotateFirst(room) {
   const n = room.seats.length;
-  if (room.game === 'quoridor') {
-    const order = Quoridor.turnOrder(n);
+  if (seatGame(room)) {
+    const order = seatOrder(room);
     room.firstSeat = room.firstSeat === null ? order[Math.floor(Math.random() * n)]
       : order[(order.indexOf(room.firstSeat) + 1) % n];
   } else {
@@ -299,13 +353,15 @@ function scheduleRoomCleanup(room) {
   }, EMPTY_ROOM_TTL_MS);
 }
 
-function createRoom(totalTime, game, players) {
+function createRoom(totalTime, game, players, rounds) {
   const isQ = game === 'quoridor';
-  const n = isQ && [2, 3, 4].includes(players) ? players : 2;
+  const isM = game === 'marble';
+  const n = (isQ || isM) && [2, 3, 4].includes(players) ? players : 2;
   const room = {
     code: makeCode(),
-    game: isQ ? 'quoridor' : 'omok',
-    totalTime: TOTAL_TIMES.includes(totalTime) ? totalTime : 600,
+    game: isQ ? 'quoridor' : isM ? 'marble' : 'omok',
+    // 부루마블은 결정 1번당 시간, 나머지는 각자 주어지는 총 시간
+    totalTime: isM ? MARBLE_TURN_SEC : TOTAL_TIMES.includes(totalTime) ? totalTime : 600,
     status: 'waiting',
     seats: Array(n).fill(null),
     winner: null,
@@ -327,6 +383,15 @@ function createRoom(totalTime, game, players) {
       clocks: Array(n).fill(0),
       history: [],
       undoAccepts: new Set(),
+    });
+  } else if (isM) {
+    Object.assign(room, {
+      m: Marble.createGame(n),
+      names: [],
+      firstSeat: null,
+      rounds: MARBLE_ROUNDS.includes(rounds) ? rounds : 20,
+      turn: null,
+      clocks: Array(n).fill(0),
     });
   } else {
     Object.assign(room, {
@@ -421,9 +486,9 @@ io.on('connection', (socket) => {
 
   // 주의: 클라이언트가 null 등을 보내도 서버가 죽지 않도록 `data || {}`로 꺼낸다
   socket.on('createRoom', (data, cb) => {
-    const { name, clientId, totalTime, game, players } = data || {};
+    const { name, clientId, totalTime, game, players, rounds } = data || {};
     if (typeof cb !== 'function' || !clientId) return;
-    const r = createRoom(Number(totalTime), game, Number(players));
+    const r = createRoom(Number(totalTime), game, Number(players), Number(rounds));
     cb(join(r.code, cleanName(name), String(clientId)));
   });
 
@@ -499,8 +564,18 @@ io.on('connection', (socket) => {
     broadcast(room);
   });
 
+  // 부루마블: {type: 'roll'|'buy'|'skip'|'build'|'sell'|'autoSell'|'travel', ...} (검증은 Marble.act가 함)
+  socket.on('act', (data) => {
+    if (!room || room.game !== 'marble' || room.status !== 'playing') return;
+    const idx = mySeatIdx();
+    if (idx < 0) return fail('관전자는 둘 수 없습니다.');
+    const err = applyAct(room, idx, data || {});
+    if (err) fail(err);
+  });
+
   socket.on('undoRequest', () => {
     if (!room || room.status !== 'playing') return;
+    if (room.game === 'marble') return fail('부루마블은 무르기가 없습니다.');
     if (room.game === 'quoridor') {
       const idx = mySeatIdx();
       if (idx < 0 || !room.q.pawns[idx]) return;
@@ -524,7 +599,7 @@ io.on('connection', (socket) => {
 
   socket.on('undoReply', (data) => {
     const { accept } = data || {};
-    if (!room || room.status !== 'playing') return;
+    if (!room || room.status !== 'playing' || room.game === 'marble') return;
     if (room.game === 'quoridor') {
       const idx = mySeatIdx();
       const requester = room.undoRequest;
@@ -596,7 +671,7 @@ io.on('connection', (socket) => {
     const t = String(text || '').trim().slice(0, 200);
     if (!t) return;
     const seat = mySeatIdx();
-    addChat(room, room.game === 'quoridor' ? { name: m.name, seat, text: t } : { name: m.name, color: myColor(), text: t });
+    addChat(room, seatGame(room) ? { name: m.name, seat, text: t } : { name: m.name, color: myColor(), text: t });
   });
 });
 
