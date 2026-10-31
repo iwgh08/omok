@@ -1,11 +1,13 @@
 // 쿼리도 판 그리기와 입력. client.js가 env({canvas, ctx, $, state, emit, toast})를 넘겨 만든다
-// 말은 원목에 색을 입힌 톤 (체리, 푸른 스테인, 올리브, 밝은 메이플). 벽과 목표 띠는 SEAT_COLORS를 쓴다
-window.QUORIDOR_PAWN_COLORS = ['#a4553a', '#4f7186', '#6f7f4a', '#f0dcae'];
+// 쿼리도는 말과 목표 띠에 나무색만 쓴다. 자리마다 밝기가 달라서 구분된다
+window.QUORIDOR_PAWN_COLORS = ['#f2e2bd', '#5a3620', '#a8683a', '#2b211c'];
+window.QUORIDOR_PAWN_NAMES = ['메이플', '호두', '벚나무', '흑단'];
 
 window.QuoridorBoard = function (env) {
   const { SIZE } = Quoridor;
-  const COLORS = window.SEAT_COLORS;
-  const PAWN_COLORS = window.QUORIDOR_PAWN_COLORS;
+  const COLORS = window.QUORIDOR_PAWN_COLORS;
+  const WALL_COLOR = '#8f5c2e'; // 어두운 홈과 밝은 칸 양쪽에서 보이는 중간 톤
+  const MARK_COLOR = '#4a2e18'; // 이동 가능한 칸과 마지막 수 표시
   const { canvas, ctx } = env;
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   const boardLayer = document.createElement('canvas'); // 테두리와 칸을 미리 그려 두는 곳
@@ -284,6 +286,9 @@ window.QuoridorBoard = function (env) {
     ctx.fill(tiles((x, y) => Quoridor.isGoal(p, x, y)));
     const rect = [[m, near, len, band], [m, far, len, band], [far, m, band, len], [near, m, band, len]][p];
     paintBar(...rect, COLORS[p]);
+    // 어두운 나무색 띠도 테두리 위에서 보이도록 밝은 윤곽을 두른다
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+    ctx.stroke();
   }
 
   // 칸을 밝히고 테두리를 두른다 (이동 가능한 칸, 마지막 수)
@@ -383,16 +388,15 @@ window.QuoridorBoard = function (env) {
 
     // 마지막 수 강조 (칸 또는 벽 테두리)
     const last = q.last;
-    if (last && last.type === 'pawn') markTile(last.x, last.y, COLORS[last.p], 0.15);
+    if (last && last.type === 'pawn') markTile(last.x, last.y, MARK_COLOR, 0.15);
 
     // 이동 가능한 칸 (미리보기 말이 올라간 칸은 점을 빼서 비쳐 보이지 않게 한다)
     const pick = touchPick || hover;
     const moves = legal();
     for (const mv of moves) {
-      const mine = COLORS[s.you.seat];
-      markTile(mv.x, mv.y, `${mine}b0`, 0.32);
+      markTile(mv.x, mv.y, `${MARK_COLOR}b0`, 0.32);
       if (same(pick, { kind: 'pawn', x: mv.x, y: mv.y })) continue;
-      ctx.fillStyle = shade(mine, -0.1);
+      ctx.fillStyle = MARK_COLOR;
       disc(center(mv.x), center(mv.y), c * 0.1);
     }
 
@@ -400,12 +404,12 @@ window.QuoridorBoard = function (env) {
     for (const wl of q.walls) {
       const f = findEffect(wallId(wl));
       const t = f ? easeOut(progress(f)) : 1;
-      drawWall(wl.x, wl.y, wl.o, COLORS[wl.p], { alpha: t, lift: (1 - t) * c * 0.3, scale: 1 + (1 - t) * 0.2 });
+      drawWall(wl.x, wl.y, wl.o, WALL_COLOR, { alpha: t, lift: (1 - t) * c * 0.3, scale: 1 + (1 - t) * 0.2 });
     }
     for (const f of effects) {
       if (f.kind !== 'wallOut') continue;
       const t = progress(f);
-      drawWall(f.wall.x, f.wall.y, f.wall.o, COLORS[f.wall.p], { alpha: 1 - t, lift: t * c * 0.12 });
+      drawWall(f.wall.x, f.wall.y, f.wall.o, WALL_COLOR, { alpha: 1 - t, lift: t * c * 0.12 });
     }
     if (last && last.type === 'wall' && !findEffect(wallId(last))) {
       const [rx, ry, rw, rh] = wallRect(last.x, last.y, last.o);
@@ -425,17 +429,17 @@ window.QuoridorBoard = function (env) {
     for (const f of effects) {
       if (f.kind !== 'out') continue;
       const t = progress(f);
-      drawPawn(center(f.x), center(f.y), PAWN_COLORS[f.p], { alpha: 1 - t, scale: 1 - t * 0.5 });
+      drawPawn(center(f.x), center(f.y), COLORS[f.p], { alpha: 1 - t, scale: 1 - t * 0.5 });
     }
-    for (const pose of poses) drawPawn(center(pose.x), center(pose.y), PAWN_COLORS[pose.p], { lift: pose.lift });
+    for (const pose of poses) drawPawn(center(pose.x), center(pose.y), COLORS[pose.p], { lift: pose.lift });
 
     // 미리보기
     if (pick && myTurn()) {
       const alpha = touchPick ? 0.75 : 0.45;
       if (pick.kind === 'pawn' && moves.some((mv) => mv.x === pick.x && mv.y === pick.y)) {
-        drawPawn(center(pick.x), center(pick.y), PAWN_COLORS[s.you.seat], { alpha });
+        drawPawn(center(pick.x), center(pick.y), COLORS[s.you.seat], { alpha });
       } else if (pick.kind === 'wall') {
-        if (wallOk(pick)) drawWall(pick.x, pick.y, pick.o, COLORS[s.you.seat], { alpha });
+        if (wallOk(pick)) drawWall(pick.x, pick.y, pick.o, WALL_COLOR, { alpha });
         else drawBlockedWall(pick.x, pick.y, pick.o, alpha);
       }
     }

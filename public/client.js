@@ -188,7 +188,7 @@
         // 쿼리도·부루마블: 말 색 점
         const dot = document.createElement('span');
         dot.textContent = msg.seat >= 0 ? '● ' : '👀 ';
-        if (msg.seat >= 0) dot.style.color = SEAT_COLORS[msg.seat];
+        if (msg.seat >= 0) dot.style.color = (state && isQ() ? window.QUORIDOR_PAWN_COLORS : SEAT_COLORS)[msg.seat];
         b.append(dot, msg.name);
       } else {
         b.textContent = (msg.color ? (msg.color === BLACK ? '● ' : '○ ') : '👀 ') + msg.name;
@@ -245,7 +245,8 @@
     const seat = state.seats.find((s) => s && s.color === color);
     return seat ? seat.name : COLOR_NAME[color];
   }
-  const seatName = (p) => state.names[p] || state.seats[p]?.name || SEAT_NAMES[p];
+  const colorNames = () => (isQ() ? window.QUORIDOR_PAWN_NAMES : SEAT_NAMES); // 쿼리도 말은 나무 이름
+  const seatName = (p) => state.names[p] || state.seats[p]?.name || colorNames()[p];
 
   // ---------- 화면 갱신 ----------
   function omokStatus(s) {
@@ -290,14 +291,14 @@
         text = myTurn ? `내 차례입니다 · ${MARBLE_PHASE[s.m.phase]} · ${round}`
           : `${seatName(s.turn)} (${SEAT_NAMES[s.turn]}) 차례 · ${round}`;
       } else {
-        text = myTurn ? `내 차례입니다 (${SEAT_NAMES[seat]}) · 말을 움직이거나 벽을 놓으세요`
-          : `${seatName(s.turn)} (${SEAT_NAMES[s.turn]}) 차례`;
+        text = myTurn ? `내 차례입니다 (${colorNames()[seat]}) · 말을 움직이거나 벽을 놓으세요`
+          : `${seatName(s.turn)} (${colorNames()[s.turn]}) 차례`;
       }
       if (seat < 0) text = '관전 중 · ' + text;
       else if (!alive) text = '탈락 · ' + text;
     } else if (s.status === 'ended') {
       const who = seat >= 0 ? (s.winner === seat ? '승리했습니다!' : `패배했습니다 · ${seatName(s.winner)} 승리`)
-        : `${seatName(s.winner)} (${SEAT_NAMES[s.winner]}) 승리`;
+        : `${seatName(s.winner)} (${colorNames()[s.winner]}) 승리`;
       text = `${who} — ${REASON_TEXT[s.reason]}`;
       if (seat >= 0 && s.rematch.length && !s.rematch.includes(seat)) text += ` · 재대국 요청 ${s.rematch.length}/${s.players}`;
     }
@@ -567,7 +568,7 @@
     // 새 대국 시작
     if (s.status === 'playing' && !wasPlaying) {
       rematchDismissed = false;
-      showBadge(`대국 시작! 나는 ${bySeat ? SEAT_NAMES[me.seat] : COLOR_NAME[me.color]}`, 1600);
+      showBadge(`대국 시작! 나는 ${bySeat ? colorNames()[me.seat] : COLOR_NAME[me.color]}`, 1600);
       return;
     }
 
