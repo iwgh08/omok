@@ -162,6 +162,7 @@
     const prev = state;
     state = s;
     stateReceivedAt = Date.now();
+    board().onState?.(prev, s);
     board().reset();
     render();
     notifyChanges(prev, s);

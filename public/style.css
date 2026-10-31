@@ -320,6 +320,9 @@ body:not([data-game="marble"]) .marble-only { display: none; }
 .player .stone.c1 { background: radial-gradient(circle at 35% 35%, #666, #111); }
 .player .stone.c2 { background: radial-gradient(circle at 35% 35%, #fff, #ccc); border: 1px solid #aaa; }
 .player .stone.c0 { border: 2px dashed var(--border); }
+body[data-game="quoridor"] .player .stone {
+  box-shadow: inset -3px -3px 5px rgba(0, 0, 0, 0.3), inset 3px 3px 5px rgba(255, 255, 255, 0.4), 0 0 0 1px rgba(0, 0, 0, 0.3);
+}
 .player .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .player .me { font-size: 12px; color: var(--accent); margin-left: 4px; }
 .player .extra { font-size: 12px; color: var(--muted); white-space: nowrap; }
