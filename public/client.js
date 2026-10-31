@@ -387,7 +387,7 @@
           connected: seat ? seat.connected : null,
           active: s.status === 'playing' && s.turn === p,
           out: started && isOut(s, p),
-          stoneColor: SEAT_COLORS[p],
+          stoneColor: (isQ() ? window.QUORIDOR_PAWN_COLORS : SEAT_COLORS)[p],
           clockKey: seat || started ? p : null,
         };
         if (isQ()) {

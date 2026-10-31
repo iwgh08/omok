@@ -1,7 +1,11 @@
 // 쿼리도 판 그리기와 입력. client.js가 env({canvas, ctx, $, state, emit, toast})를 넘겨 만든다
+// 말은 원목에 색을 입힌 톤 (체리, 푸른 스테인, 올리브, 밝은 메이플). 벽과 목표 띠는 SEAT_COLORS를 쓴다
+window.QUORIDOR_PAWN_COLORS = ['#a4553a', '#4f7186', '#6f7f4a', '#f0dcae'];
+
 window.QuoridorBoard = function (env) {
   const { SIZE } = Quoridor;
   const COLORS = window.SEAT_COLORS;
+  const PAWN_COLORS = window.QUORIDOR_PAWN_COLORS;
   const { canvas, ctx } = env;
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   const boardLayer = document.createElement('canvas'); // 테두리와 칸을 미리 그려 두는 곳
@@ -225,16 +229,27 @@ window.QuoridorBoard = function (env) {
     // 머리: 빛을 받은 둥근 윗부분
     const hx = cx - r * 0.04, hy = y - r * 0.06, hr = r * 0.68;
     const dome = ctx.createRadialGradient(hx - hr * 0.35, hy - hr * 0.4, hr * 0.08, hx, hy, hr);
-    dome.addColorStop(0, shade(color, 0.6));
+    dome.addColorStop(0, shade(color, 0.3));
     dome.addColorStop(0.55, color);
     dome.addColorStop(1, shade(color, -0.28));
     ctx.fillStyle = dome;
     disc(hx, hy, hr);
 
+    // 나이테
+    ctx.strokeStyle = shade(color, -0.45);
+    ctx.lineWidth = Math.max(1, r * 0.03);
+    ctx.globalAlpha = alpha * 0.35;
+    for (const k of [0.3, 0.55, 0.8]) {
+      ctx.beginPath();
+      ctx.arc(hx + hr * 0.08, hy + hr * 0.06, hr * k, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = alpha;
+
     // 광택
     const gx = hx - hr * 0.36, gy = hy - hr * 0.42, gr = hr * 0.42;
     const gloss = ctx.createRadialGradient(gx, gy, 0, gx, gy, gr);
-    gloss.addColorStop(0, 'rgba(255,255,255,0.75)');
+    gloss.addColorStop(0, 'rgba(255,255,255,0.28)');
     gloss.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.fillStyle = gloss;
     disc(gx, gy, gr);
@@ -410,15 +425,15 @@ window.QuoridorBoard = function (env) {
     for (const f of effects) {
       if (f.kind !== 'out') continue;
       const t = progress(f);
-      drawPawn(center(f.x), center(f.y), COLORS[f.p], { alpha: 1 - t, scale: 1 - t * 0.5 });
+      drawPawn(center(f.x), center(f.y), PAWN_COLORS[f.p], { alpha: 1 - t, scale: 1 - t * 0.5 });
     }
-    for (const pose of poses) drawPawn(center(pose.x), center(pose.y), COLORS[pose.p], { lift: pose.lift });
+    for (const pose of poses) drawPawn(center(pose.x), center(pose.y), PAWN_COLORS[pose.p], { lift: pose.lift });
 
     // 미리보기
     if (pick && myTurn()) {
       const alpha = touchPick ? 0.75 : 0.45;
       if (pick.kind === 'pawn' && moves.some((mv) => mv.x === pick.x && mv.y === pick.y)) {
-        drawPawn(center(pick.x), center(pick.y), COLORS[s.you.seat], { alpha });
+        drawPawn(center(pick.x), center(pick.y), PAWN_COLORS[s.you.seat], { alpha });
       } else if (pick.kind === 'wall') {
         if (wallOk(pick)) drawWall(pick.x, pick.y, pick.o, COLORS[s.you.seat], { alpha });
         else drawBlockedWall(pick.x, pick.y, pick.o, alpha);
